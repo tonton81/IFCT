@@ -1,0 +1,146 @@
+/*
+  MIT License
+
+  Copyright (c) 2018 Antonio Alexander Brewer (tonton81) - https://github.com/tonton81
+
+  Designed and tested for PJRC Teensy (3.6 currently testing..).
+
+  Forum link : https://forum.pjrc.com/threads/52906-IFCT-Improved-Flexcan-Teensy-Library
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+*/
+
+
+#ifndef _IFCT_H_
+#define _IFCT_H_
+#include <kinetis_flexcan.h>
+#include <kinetis.h>
+
+#define ext flags.extended
+#define rtr flags.remote
+#define FLEXCANb_MCR(b)  (*(vuint32_t*)(b))
+#define FLEXCANb_CTRL1(b)(*(vuint32_t*)(b+4))
+#define FLEXCANb_RXMGMASK(b)              (*(vuint32_t*)(b+0x10))
+#define FLEXCANb_IFLAG1(b)                (*(vuint32_t*)(b+0x30))
+#define FLEXCANb_IMASK1(b)                (*(vuint32_t*)(b+0x28))
+#define FLEXCANb_RXFGMASK(b)              (*(vuint32_t*)(b+0x48))
+#define FLEXCANb_MBn_CS(b, n)             (*(vuint32_t*)(b+0x80+n*0x10))
+#define FLEXCANb_MBn_ID(b, n)             (*(vuint32_t*)(b+0x84+n*0x10))
+#define FLEXCANb_MBn_WORD0(b, n)          (*(vuint32_t*)(b+0x88+n*0x10))
+#define FLEXCANb_MBn_WORD1(b, n)          (*(vuint32_t*)(b+0x8C+n*0x10))
+#define FLEXCANb_IDFLT_TAB(b, n)          (*(vuint32_t*)(b+0xE0+(n*4)))
+#define FLEXCANb_MB_MASK(b, n)            (*(vuint32_t*)(b+0x880+(n*4)))
+#define FLEXCANb_ESR1(b) (*(vuint32_t*)(b+0x20))
+#define FLEXCANb_MAXMB_SIZE(b)            ((b & FLEXCAN_MCR_MAXMB_MASK) & 0xF)
+
+typedef struct CAN_message_t {
+  uint32_t id;          // can identifier
+  uint16_t timestamp;   // FlexCAN time when message arrived
+  struct {
+    uint8_t extended: 1; // identifier is extended (29-bit)
+    uint8_t remote: 1;  // remote transmission request packet type
+    uint8_t overrun: 1; // message overrun
+    uint8_t reserved: 5;
+  } flags;
+  uint8_t len = 0;      // length of data
+  uint8_t buf[8];       // data
+  uint8_t mb = 0;       // used to identify mailbox reception
+} CAN_message_t;
+
+typedef enum IFCTMBNUM {
+  MB0 = 0,
+  MB1 = 1,
+  MB2 = 2,
+  MB3 = 3,
+  MB4 = 4,
+  MB5 = 5,
+  MB6 = 6,
+  MB7 = 7,
+  MB8 = 8,
+  MB9 = 9,
+  MB10 = 10,
+  MB11 = 11,
+  MB12 = 12,
+  MB13 = 13,
+  MB14 = 14,
+  MB15 = 15,
+} IFCTMBNUM;
+typedef enum IFCTMBTXRX {
+  TX,
+  RX,
+  DISABLE
+} IFCTMBTXRX;
+typedef enum IFCTMBIDE {
+  NONE = 0,
+  IDE = 1,
+} IFCTMBIDE;
+
+
+
+
+typedef void (*_MB_ptr)(const CAN_message_t &msg);
+
+
+
+
+
+class IFCT {
+
+  public:
+    IFCT(uint32_t baud = 1000000, uint32_t base = FLEXCAN0_BASE);
+    void enableFIFOInterrupt(bool status = 1);
+    void disableFIFOInterrupt();
+    void enableFIFO(bool status = 1);
+    void disableFIFO();
+    void setBaudRate(uint32_t baud = 1000000);
+    void setMB(const IFCTMBNUM &mb_num, const IFCTMBTXRX &mb_rx_tx, const IFCTMBIDE &ide = NONE);
+    void enableMBInterrupt(const IFCTMBNUM &mb_num, bool status = 1);
+    void disableMBInterrupt(const IFCTMBNUM &mb_num);
+    void onReceive(const IFCTMBNUM &mb_num, _MB_ptr handler); /* individual mailbox callback function */
+    void onReceive(_MB_ptr handler); /* global callback function */
+    void mailboxStatus(); /* shows status of each mailbox, RX, TX, FIFO, etc... */
+    static _MB_ptr _MB0handler; 
+    static _MB_ptr _MB1handler; 
+    static _MB_ptr _MB2handler; 
+    static _MB_ptr _MB3handler; 
+    static _MB_ptr _MB4handler; 
+    static _MB_ptr _MB5handler; 
+    static _MB_ptr _MB6handler; 
+    static _MB_ptr _MB7handler; 
+    static _MB_ptr _MB8handler; 
+    static _MB_ptr _MB9handler; 
+    static _MB_ptr _MB10handler; 
+    static _MB_ptr _MB11handler; 
+    static _MB_ptr _MB12handler; 
+    static _MB_ptr _MB13handler; 
+    static _MB_ptr _MB14handler; 
+    static _MB_ptr _MB15handler; 
+    static _MB_ptr _MBAllhandler; 
+    bool pollFIFO(CAN_message_t &msg, bool poll = 1);
+    int write(const CAN_message_t &msg);
+    int read(CAN_message_t &msg);
+
+  private:
+
+    void softReset();
+    void FLEXCAN_EnterFreezeMode();
+    void FLEXCAN_ExitFreezeMode();
+
+};
+#endif

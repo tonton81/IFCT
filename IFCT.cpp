@@ -1,0 +1,726 @@
+/*
+  MIT License
+
+  Copyright (c) 2018 Antonio Alexander Brewer (tonton81) - https://github.com/tonton81
+
+  Designed and tested for PJRC Teensy (3.6 currently testing..).
+
+  Forum link : https://forum.pjrc.com/threads/52906-IFCT-Improved-Flexcan-Teensy-Library
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+*/
+
+#include <IFCT.h>
+#include <kinetis_flexcan.h>
+#include <kinetis.h>
+#include "Arduino.h"
+
+
+_MB_ptr IFCT::_MB0handler = nullptr;
+_MB_ptr IFCT::_MB1handler = nullptr;
+_MB_ptr IFCT::_MB2handler = nullptr;
+_MB_ptr IFCT::_MB3handler = nullptr;
+_MB_ptr IFCT::_MB4handler = nullptr;
+_MB_ptr IFCT::_MB5handler = nullptr;
+_MB_ptr IFCT::_MB6handler = nullptr;
+_MB_ptr IFCT::_MB7handler = nullptr;
+_MB_ptr IFCT::_MB8handler = nullptr;
+_MB_ptr IFCT::_MB9handler = nullptr;
+_MB_ptr IFCT::_MB10handler = nullptr;
+_MB_ptr IFCT::_MB11handler = nullptr;
+_MB_ptr IFCT::_MB12handler = nullptr;
+_MB_ptr IFCT::_MB13handler = nullptr;
+_MB_ptr IFCT::_MB14handler = nullptr;
+_MB_ptr IFCT::_MB15handler = nullptr;
+_MB_ptr IFCT::_MBAllhandler = nullptr;
+
+
+
+
+
+
+IFCT::IFCT(uint32_t baud, uint32_t base) {
+  OSC0_CR |= OSC_ERCLKEN;
+  SIM_SCGC6 |= SIM_SCGC6_FLEXCAN0;
+  FLEXCAN0_CTRL1 &= ~FLEXCAN_CTRL_CLK_SRC;
+  FLEXCAN0_MCR |= FLEXCAN_MCR_FRZ; /* enable module */
+  FLEXCAN0_MCR &= ~FLEXCAN_MCR_MDIS; /* enable module */
+  while (FLEXCAN0_MCR & FLEXCAN_MCR_LPM_ACK);
+  softReset(); /* reset bus */
+  while (!(FLEXCAN0_MCR & FLEXCAN_MCR_FRZ_ACK));
+  FLEXCAN0_MCR |= FLEXCAN_MCR_SRX_DIS; /* Disable self-reception */
+  disableFIFO();
+  disableFIFOInterrupt();
+  setBaudRate(baud);
+  FLEXCAN0_MCR |= FLEXCAN_MCR_IRMQ; // individual mailbox masking
+  FLEXCAN0_CTRL2 |= FLEXCAN_CTRL2_RRS | // store remote frames
+                    FLEXCAN_CTRL2_MRP; // mailbox > FIFO priority.
+  FLEXCAN0_MCR &= ~FLEXCAN_MCR_HALT; /* start the CAN */
+  while (FLEXCAN0_MCR & FLEXCAN_MCR_FRZ_ACK);
+  while (FLEXCAN0_MCR & FLEXCAN_MCR_NOT_RDY); /* wait until ready */
+
+  NVIC_SET_PRIORITY(IRQ_CAN0_MESSAGE, 0); /* set interrupt priority */
+  NVIC_ENABLE_IRQ(IRQ_CAN0_MESSAGE); /* enable message interrupt */
+  CORE_PIN3_CONFIG = PORT_PCR_MUX(2);
+  CORE_PIN4_CONFIG = PORT_PCR_MUX(2);
+}
+ 
+
+void IFCT::softReset() {
+  /*
+    Soft Reset
+    The following registers are reset: MCR (except the MDIS bit), TIMER , ECR, ESR1, ESR2,
+    IMASK1, IMASK2, IFLAG1, IFLAG2 and CRCR. Configuration registers that control the interface to the
+    CAN bus are not affected by soft reset.
+    The following registers are unaffected: CTRL1, CTRL2, all RXIMR
+    registers, RXMGMASK, RX14MASK, RX15MASK, RXFGMASK, RXFIR, all Message Buffers .
+  */
+  FLEXCAN0_MCR ^= FLEXCAN_MCR_SOFT_RST;
+  while (FLEXCAN0_MCR & FLEXCAN_MCR_SOFT_RST);
+}
+
+
+void IFCT::enableFIFO(bool status) {
+  bool frz_flag_negate = 0;
+  if ( !(FLEXCAN0_MCR & FLEXCAN_MCR_FRZ_ACK) ) { // currently not in freeze mode
+    frz_flag_negate = 1; FLEXCAN_EnterFreezeMode();
+  }
+  FLEXCAN0_MCR &= ~FLEXCAN_MCR_FEN; // Disable FIFO if already enabled for cleanup.
+  FLEXCAN0_IMASK1 = 0UL; // disable all FIFO/MB Interrupts
+  for (uint8_t i = 0; i < 16; i++ ) { // clear all mailboxes
+    FLEXCANb_MBn_ID(FLEXCAN0_BASE, i) = 0x00000000;
+    FLEXCANb_MBn_WORD0(FLEXCAN0_BASE, i) = 0x00000000;
+    FLEXCANb_MBn_WORD1(FLEXCAN0_BASE, i) = 0x00000000;
+    FLEXCANb_MBn_CS(FLEXCAN0_BASE, i) = 0x00000000;
+  }
+  for ( uint8_t i = 0; i < 16; i++ ) FLEXCANb_MB_MASK(FLEXCAN0_BASE, i) = 0; // CLEAR MAILBOX MASKS (RXIMR)
+  /*
+    RXMGMASK is provided for legacy application support.
+    •  When the MCR[IRMQ] bit is negated, RXMGMASK is always in effect.
+    •  When the MCR[IRMQ] bit is asserted, RXMGMASK has no effect.
+    RXMGMASK is used to mask the filter fields of all Rx MBs, excluding MBs 14-15,
+    which have individual mask registers
+    RX14MASK/RX15MASK is provided for legacy application support. When the MCR[IRMQ] bit is
+    asserted, RX14MASK/RX15MASK has no effect
+  */
+  FLEXCAN0_RXMGMASK = FLEXCAN0_RXFGMASK = 0;
+  /*
+      Enable RX FIFO
+      Before enabling the RFEN, the CPU must service the IFLAG bits asserted in the Rx
+      FIFO region; Otherwise, these IFLAG bits will mistakenly show
+      the related MBs now belonging to FIFO as having contents to be serviced.
+  */
+  FLEXCAN0_IFLAG1 = FLEXCAN0_IFLAG1; // (all bits reset when written back)
+  if ( status ) {
+    FLEXCAN0_MCR |= FLEXCAN_MCR_FEN;
+    /*
+      Each group of eight filters occupies a memory space equivalent to two Message Buffers which
+      means that the more filters are implemented the less Mailboxes will be available.
+    */
+    FLEXCAN_set_rffn(FLEXCAN0_CTRL2, 0); // setup 8 Filters for FIFO, 0-5 = FIFO, 6-7 FILTER, 8-16 MBs, max value 0x3 which leaves MB14/15 free to use.
+    // Setup TX mailboxes from 8 -> 15, FIFO uses the first 8 (6MB for FIFO, 2MB for 8 filters for FIFO).
+    uint32_t remaining_mailboxes = 10 /* MAXMB - FIFO */ - ((((FLEXCAN0_CTRL2 >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    for (int i = remaining_mailboxes; i < 16; i++) FLEXCAN0_MBn_CS(i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_INACTIVE);
+  }
+  else { // FIFO disabled default setup of mailboxes, 0-7 RX, 8-15 TX
+    for (uint8_t i = 0; i < 16; i++ ) { // clear all mailboxes
+      if ( i < 8 ) {
+        FLEXCANb_MBn_ID(FLEXCAN0_BASE, i) = 0x00000000;
+        FLEXCANb_MBn_WORD0(FLEXCAN0_BASE, i) = 0x00000000;
+        FLEXCANb_MBn_WORD1(FLEXCAN0_BASE, i) = 0x00000000;
+        if ( i < 4 ) FLEXCANb_MBn_CS(FLEXCAN0_BASE, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY);
+        else FLEXCANb_MBn_CS(FLEXCAN0_BASE, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY) | FLEXCAN_MB_CS_IDE | FLEXCAN_MB_CS_IDE;
+      }
+      else {
+        FLEXCANb_MBn_ID(FLEXCAN0_BASE, i) = 0x00000000;
+        FLEXCANb_MBn_WORD0(FLEXCAN0_BASE, i) = 0x00000000;
+        FLEXCANb_MBn_WORD1(FLEXCAN0_BASE, i) = 0x00000000;
+        FLEXCANb_MBn_CS(FLEXCAN0_BASE, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_INACTIVE);
+      }
+    }
+  }
+  if ( frz_flag_negate ) FLEXCAN_ExitFreezeMode();
+}
+
+
+void IFCT::disableFIFO() {
+  enableFIFO(0);
+}
+
+
+void IFCT::enableFIFOInterrupt(bool status) {
+  if ( !(FLEXCAN0_MCR & FLEXCAN_MCR_FEN) ) {
+    Serial.println("FIFO must be enabled first"); return;
+  }
+  if ( FLEXCAN0_IMASK1 & FLEXCAN_IMASK1_BUF5M ) {
+    Serial.println("FIFO interrupts already enabled"); return;
+  }
+  ( !status ) ? FLEXCAN0_IMASK1 &= ~FLEXCAN_IMASK1_BUF5M /* disable FIFO interrupt */ : FLEXCAN0_IMASK1 |= FLEXCAN_IMASK1_BUF5M; /* enable FIFO interrupt */
+}
+
+
+void IFCT::disableFIFOInterrupt() {
+  enableFIFOInterrupt(0);
+}
+
+
+void IFCT::setBaudRate(uint32_t baud) {
+  uint32_t divisor = 0, bestDivisor = 0, result = 16000000 / baud / (divisor + 1);
+  int error = baud - (16000000 / (result * (divisor + 1))), bestError = error;
+
+  while (result > 5) {
+    divisor++;
+    result = 16000000 / baud / (divisor + 1);
+    if (result <= 25) {
+      error = baud - (16000000 / (result * (divisor + 1)));
+      if (error < 0) error *= -1;
+      if (error < bestError) {
+        bestError = error;
+        bestDivisor = divisor;
+      }
+      if ((error == bestError) && (result > 11) && (result < 19)) {
+        bestError = error;
+        bestDivisor = divisor;
+      }
+    }
+  }
+
+  divisor = bestDivisor;
+  result = 16000000 / baud / (divisor + 1);
+
+  if ((result < 5) || (result > 25) || (bestError > 300)) return;
+  result -= 5; // the bitTimingTable is offset by 5 since there was no reason to store bit timings for invalid numbers
+  uint8_t bitTimingTable[21][3] = {
+    {0, 0, 1}, //5
+    {1, 0, 1}, //6
+    {1, 1, 1}, //7
+    {2, 1, 1}, //8
+    {2, 2, 1}, //9
+    {2, 3, 1}, //10
+    {2, 3, 2}, //11
+    {2, 4, 2}, //12
+    {2, 5, 2}, //13
+    {2, 5, 3}, //14
+    {2, 6, 3}, //15
+    {2, 7, 3}, //16
+    {2, 7, 4}, //17
+    {3, 7, 4}, //18
+    {3, 7, 5}, //19
+    {4, 7, 5}, //20
+    {4, 7, 6}, //21
+    {5, 7, 6}, //22
+    {6, 7, 6}, //23
+    {6, 7, 7}, //24
+    {7, 7, 7}, //25
+  }, propSeg = bitTimingTable[result][0], pSeg1 = bitTimingTable[result][1], pSeg2 = bitTimingTable[result][2];
+  FLEXCAN0_CTRL1 = (FLEXCAN_CTRL_PROPSEG(propSeg) | FLEXCAN_CTRL_RJW(1) | FLEXCAN_CTRL_PSEG1(pSeg1) |
+                    FLEXCAN_CTRL_PSEG2(pSeg2) | FLEXCAN_CTRL_PRESDIV(divisor));
+}
+
+
+void IFCT::setMB(const IFCTMBNUM &mb_num, const IFCTMBTXRX &mb_rx_tx, const IFCTMBIDE &ide) {
+  if ( FLEXCAN0_MCR & FLEXCAN_MCR_FEN ) {
+    uint32_t remaining_mailboxes = 10 /* MAXMB(16) - FIFO(6) */ - ((((FLEXCAN0_CTRL2 >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    if ( mb_num < ( 16 - remaining_mailboxes ) ) {
+      Serial.println("Mailbox not available"); return;
+    }
+  }
+  if ( mb_rx_tx == RX ) {
+    FLEXCAN0_IMASK1 &= ~(1UL << mb_num); /* immediately disable mailbox interrupt */
+    FLEXCAN_get_code(FLEXCANb_MBn_CS(FLEXCAN0_BASE, mb_num)); // Reading Control Status atomically locks mailbox (if it is RX mode).
+    FLEXCANb_MBn_ID(FLEXCAN0_BASE, mb_num) = 0x00000000;
+    FLEXCANb_MBn_WORD0(FLEXCAN0_BASE, mb_num) = 0x00000000;
+    FLEXCANb_MBn_WORD1(FLEXCAN0_BASE, mb_num) = 0x00000000;
+    if ( ide != IDE ) FLEXCANb_MBn_CS(FLEXCAN0_BASE, mb_num) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY);
+    else FLEXCANb_MBn_CS(FLEXCAN0_BASE, mb_num) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY) | FLEXCAN_MB_CS_SRR | FLEXCAN_MB_CS_IDE;
+  }
+  if ( mb_rx_tx == TX ) {
+    FLEXCAN0_IMASK1 &= ~(1UL << mb_num); /* immediately disable mailbox interrupt */
+    FLEXCAN_get_code(FLEXCANb_MBn_CS(FLEXCAN0_BASE, mb_num)); // Reading Control Status atomically locks mailbox (if it is RX mode).
+    FLEXCANb_MBn_ID(FLEXCAN0_BASE, mb_num) = 0x00000000;
+    FLEXCANb_MBn_WORD0(FLEXCAN0_BASE, mb_num) = 0x00000000;
+    FLEXCANb_MBn_WORD1(FLEXCAN0_BASE, mb_num) = 0x00000000;
+    FLEXCANb_MBn_CS(FLEXCAN0_BASE, mb_num) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_INACTIVE);
+  }
+  FLEXCAN0_TIMER; // reading timer unlocks individual mailbox
+}
+void IFCT::enableMBInterrupt(const IFCTMBNUM &mb_num, bool status) {
+  if ( FLEXCAN0_MCR & FLEXCAN_MCR_FEN ) {
+    uint32_t remaining_mailboxes = 10 /* MAXMB(16) - FIFO(6) */ - ((((FLEXCAN0_CTRL2 >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    if ( mb_num < ( 16 - remaining_mailboxes ) ) {
+      Serial.println("Mailbox not available"); return;
+    }
+  }
+  if ( status ) {
+    if ( !(FLEXCAN0_IMASK1 & ( 1UL << mb_num )) ) FLEXCAN0_IMASK1 |= (1UL << mb_num); /* enable mailbox interrupt */
+    else {
+      Serial.print("Mailbox interrupt already enabled for MB"); Serial.println(mb_num);
+    }
+  }
+  else FLEXCAN0_IMASK1 &= ~(1UL << mb_num); /* disable mailbox interrupt */
+}
+void IFCT::disableMBInterrupt(const IFCTMBNUM &mb_num) {
+  enableMBInterrupt(mb_num, 0);
+}
+
+void IFCT::FLEXCAN_EnterFreezeMode() {
+  FLEXCAN0_MCR |= FLEXCAN_MCR_HALT;
+  while (!(FLEXCAN0_MCR & FLEXCAN_MCR_FRZ_ACK));
+}
+void IFCT::FLEXCAN_ExitFreezeMode() {
+  FLEXCAN0_MCR &= ~FLEXCAN_MCR_HALT;
+  while (FLEXCAN0_MCR & FLEXCAN_MCR_FRZ_ACK);
+}
+
+void IFCT::onReceive(const IFCTMBNUM &mb_num, _MB_ptr handler) {
+  switch ( mb_num ) {
+    case MB0: {
+        _MB0handler = handler; break;
+      }
+    case MB1: {
+        _MB1handler = handler; break;
+      }
+    case MB2: {
+        _MB2handler = handler; break;
+      }
+    case MB3: {
+        _MB3handler = handler; break;
+      }
+    case MB4: {
+        _MB4handler = handler; break;
+      }
+    case MB5: {
+        _MB5handler = handler; break;
+      }
+    case MB6: {
+        _MB6handler = handler; break;
+      }
+    case MB7: {
+        _MB7handler = handler; break;
+      }
+    case MB8: {
+        _MB8handler = handler; break;
+      }
+    case MB9: {
+        _MB9handler = handler; break;
+      }
+    case MB10: {
+        _MB10handler = handler; break;
+      }
+    case MB11: {
+        _MB11handler = handler; break;
+      }
+    case MB12: {
+        _MB12handler = handler; break;
+      }
+    case MB13: {
+        _MB13handler = handler; break;
+      }
+    case MB14: {
+        _MB14handler = handler; break;
+      }
+    case MB15: {
+        _MB15handler = handler; break;
+      }
+  } // end switch
+}
+void IFCT::onReceive(_MB_ptr handler) {
+  _MB0handler = nullptr;
+  _MB1handler = nullptr;
+  _MB2handler = nullptr;
+  _MB3handler = nullptr;
+  _MB4handler = nullptr;
+  _MB5handler = nullptr;
+  _MB6handler = nullptr;
+  _MB7handler = nullptr;
+  _MB8handler = nullptr;
+  _MB9handler = nullptr;
+  _MB10handler = nullptr;
+  _MB11handler = nullptr;
+  _MB12handler = nullptr;
+  _MB13handler = nullptr;
+  _MB14handler = nullptr;
+  _MB15handler = nullptr;
+  _MBAllhandler = handler;
+}
+void sendMSGtoIndividualMBCallback(const IFCTMBNUM &mb_num, const CAN_message_t &msg) { /* this is global for ISR use */
+  switch (mb_num) {
+    case MB0: {
+        if ( IFCT::_MB0handler != nullptr ) IFCT::_MB0handler(msg); break;
+      }
+    case MB1: {
+        if ( IFCT::_MB1handler != nullptr ) IFCT::_MB1handler(msg); break;
+      }
+    case MB2: {
+        if ( IFCT::_MB2handler != nullptr ) IFCT::_MB2handler(msg); break;
+      }
+    case MB3: {
+        if ( IFCT::_MB3handler != nullptr ) IFCT::_MB3handler(msg); break;
+      }
+    case MB4: {
+        if ( IFCT::_MB4handler != nullptr ) IFCT::_MB4handler(msg); break;
+      }
+    case MB5: {
+        if ( IFCT::_MB5handler != nullptr ) IFCT::_MB5handler(msg); break;
+      }
+    case MB6: {
+        if ( IFCT::_MB6handler != nullptr ) IFCT::_MB6handler(msg); break;
+      }
+    case MB7: {
+        if ( IFCT::_MB7handler != nullptr ) IFCT::_MB7handler(msg); break;
+      }
+    case MB8: {
+        if ( IFCT::_MB8handler != nullptr ) IFCT::_MB8handler(msg); break;
+      }
+    case MB9: {
+        if ( IFCT::_MB9handler != nullptr ) IFCT::_MB9handler(msg); break;
+      }
+    case MB10: {
+        if ( IFCT::_MB10handler != nullptr ) IFCT::_MB10handler(msg); break;
+      }
+    case MB11: {
+        if ( IFCT::_MB11handler != nullptr ) IFCT::_MB11handler(msg); break;
+      }
+    case MB12: {
+        if ( IFCT::_MB12handler != nullptr ) IFCT::_MB12handler(msg); break;
+      }
+    case MB13: {
+        if ( IFCT::_MB13handler != nullptr ) IFCT::_MB13handler(msg); break;
+      }
+    case MB14: {
+        if ( IFCT::_MB14handler != nullptr ) IFCT::_MB14handler(msg); break;
+      }
+    case MB15: {
+        if ( IFCT::_MB15handler != nullptr ) IFCT::_MB15handler(msg); break;
+      }
+  }
+}
+
+bool IFCT::pollFIFO(CAN_message_t &msg, bool poll) {
+  if ( !( FLEXCAN0_MCR & FLEXCAN_MCR_FEN ) ) return 0; /* FIFO is NOT enabled! */
+  if ( !poll ) NVIC_ENABLE_IRQ(IRQ_CAN0_MESSAGE); /* enable message interrupt */
+  else NVIC_DISABLE_IRQ(IRQ_CAN0_MESSAGE); /* disable message interrupt */
+  if ( FLEXCAN0_MCR & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, capture frames */
+    if ( FLEXCAN0_IFLAG1 & FLEXCAN_IMASK1_BUF5M ) {
+      msg.len = FLEXCAN_get_length(FLEXCANb_MBn_CS(FLEXCAN0_BASE, 0));
+      msg.flags.extended = (FLEXCANb_MBn_CS(FLEXCAN0_BASE, 0) & FLEXCAN_MB_CS_IDE) ? 1 : 0;
+      msg.flags.remote = (FLEXCANb_MBn_CS(FLEXCAN0_BASE, 0) & FLEXCAN_MB_CS_RTR) ? 1 : 0;
+      msg.timestamp = FLEXCAN_get_timestamp (FLEXCANb_MBn_CS(FLEXCAN0_BASE, 0));
+      msg.id = (FLEXCANb_MBn_ID(FLEXCAN0_BASE, 0) & FLEXCAN_MB_ID_EXT_MASK);
+      if (!msg.flags.extended) msg.id >>= FLEXCAN_MB_ID_STD_BIT_NO;
+      uint32_t dataIn = FLEXCANb_MBn_WORD0(FLEXCAN0_BASE, 0);
+      msg.buf[0] = dataIn >> 24; msg.buf[1] = dataIn >> 16; msg.buf[2] = dataIn >> 8; msg.buf[3] = dataIn;
+      dataIn = FLEXCANb_MBn_WORD1(FLEXCAN0_BASE, 0);
+      msg.buf[4] = dataIn >> 24; msg.buf[5] = dataIn >> 16; msg.buf[6] = dataIn >> 8; msg.buf[7] = dataIn;
+      FLEXCAN0_IFLAG1 = FLEXCAN_IMASK1_BUF5M; /* clear FIFO bit only! */
+      return 1;
+    }
+  }
+  return 0;
+}
+
+
+int IFCT::write(const CAN_message_t &msg) {
+  int8_t retries = 3;
+retry_tx_flexcan:
+  uint8_t mailboxes = 0;
+  if ( FLEXCAN0_MCR & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, get only remaining TX (if any) */
+    uint32_t remaining_mailboxes = 10 /* MAXMB - FIFO */ - ((((FLEXCAN0_CTRL2 >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    mailboxes = 16 - remaining_mailboxes;
+  }
+  for (uint8_t i = mailboxes; i < 16; i++) {
+    if ( FLEXCAN_get_code(FLEXCANb_MBn_CS(FLEXCAN0_BASE, i)) == FLEXCAN_MB_CODE_TX_INACTIVE ) {
+      if (msg.flags.extended) FLEXCANb_MBn_ID(FLEXCAN0_BASE, i) = (msg.id & FLEXCAN_MB_ID_EXT_MASK);
+      else FLEXCANb_MBn_ID(FLEXCAN0_BASE, i) = FLEXCAN_MB_ID_IDSTD(msg.id);
+      FLEXCANb_MBn_WORD0(FLEXCAN0_BASE, i) = (msg.buf[0] << 24) | (msg.buf[1] << 16) | (msg.buf[2] << 8) | msg.buf[3];
+      FLEXCANb_MBn_WORD1(FLEXCAN0_BASE, i) = (msg.buf[4] << 24) | (msg.buf[5] << 16) | (msg.buf[6] << 8) | msg.buf[7];
+      FLEXCANb_MBn_CS(FLEXCAN0_BASE, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_ONCE) |
+                                          FLEXCAN_MB_CS_LENGTH(msg.len) |
+                                          ((msg.flags.remote) ? FLEXCAN_MB_CS_RTR : 0UL) |
+                                          ((msg.flags.extended) ? FLEXCAN_MB_CS_IDE : 0UL) |
+                                          ((msg.flags.extended) ? FLEXCAN_MB_CS_SRR : 0UL);
+      return 1; /* transmit entry accepted */
+    } // CODE CHECK
+  } // FOR LOOP
+  if ( retries-- > 0 ) goto retry_tx_flexcan;
+  return 0; /* transmit entry failed, no mailboxes available */
+}
+
+
+int IFCT::read(CAN_message_t &msg) {
+  static uint8_t mailbox_check = 0; /* incremental counter we use to sweep accross mailboxes evenly every call */
+  uint8_t cycle_count = 0;
+rescan_flexcan_rx_mailboxes:
+  uint32_t status = FLEXCANb_IFLAG1(FLEXCAN0_BASE), timeout = millis();
+
+  if ( FLEXCAN0_MCR & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, get only remaining RX (if any) */
+    uint32_t remaining_mailboxes = 10 /* MAXMB - FIFO */ - ((((FLEXCAN0_CTRL2 >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    mailbox_check = 16 - remaining_mailboxes;
+  }
+  while (!(status & (1 << mailbox_check))) {
+    if ( ++mailbox_check > 15 ) {
+      mailbox_check = 0U; // skip mailboxes that haven't triggered an interrupt
+      if ( FLEXCAN0_MCR & FLEXCAN_MCR_FEN ) {  /* FIFO is enabled, get only remaining RX (if any) */
+        uint32_t remaining_mailboxes = 10 /* MAXMB - FIFO */ - ((((FLEXCAN0_CTRL2 >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+        mailbox_check = 16 - remaining_mailboxes;
+      }
+    }
+    if ( millis() - timeout > 100 ) return 0; /* no frames available */
+  }
+
+  uint32_t code = FLEXCAN_get_code(FLEXCANb_MBn_CS(FLEXCAN0_BASE, mailbox_check)); // Reading Control Status atomically locks mailbox.
+  switch ( code ) {
+    case FLEXCAN_MB_CODE_RX_FULL:           // rx full, Copy the frame to RX buffer
+    case FLEXCAN_MB_CODE_RX_OVERRUN: {      // rx overrun. Incomming frame overwrote existing frame.
+        msg.len = FLEXCAN_get_length(FLEXCANb_MBn_CS(FLEXCAN0_BASE, mailbox_check));
+        msg.flags.extended = (FLEXCANb_MBn_CS(FLEXCAN0_BASE, mailbox_check) & FLEXCAN_MB_CS_IDE) ? 1 : 0;
+        msg.flags.remote = (FLEXCANb_MBn_CS(FLEXCAN0_BASE, mailbox_check) & FLEXCAN_MB_CS_RTR) ? 1 : 0;
+        msg.timestamp = FLEXCAN_get_timestamp (FLEXCANb_MBn_CS(FLEXCAN0_BASE, mailbox_check));
+        msg.id = (FLEXCANb_MBn_ID(FLEXCAN0_BASE, mailbox_check) & FLEXCAN_MB_ID_EXT_MASK);
+        if (!msg.flags.extended) msg.id >>= FLEXCAN_MB_ID_STD_BIT_NO;
+        uint32_t dataIn = FLEXCANb_MBn_WORD0(FLEXCAN0_BASE, mailbox_check);
+        msg.buf[0] = dataIn >> 24; msg.buf[1] = dataIn >> 16; msg.buf[2] = dataIn >> 8; msg.buf[3] = dataIn;
+        dataIn = FLEXCANb_MBn_WORD1(FLEXCAN0_BASE, mailbox_check);
+        msg.buf[4] = dataIn >> 24; msg.buf[5] = dataIn >> 16; msg.buf[6] = dataIn >> 8; msg.buf[7] = dataIn;
+        msg.mb = mailbox_check; /* store the mailbox the message came from (for callback reference) */
+        if (!msg.flags.extended) FLEXCANb_MBn_CS(FLEXCAN0_BASE, mailbox_check) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY);
+        else FLEXCANb_MBn_CS(FLEXCAN0_BASE, mailbox_check) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY) | FLEXCAN_MB_CS_SRR | FLEXCAN_MB_CS_IDE;
+        FLEXCAN0_TIMER; // reading timer unlocks individual mailbox
+        FLEXCAN0_IFLAG1 = (1UL << mailbox_check); /* immediately flush interrupt of current mailbox */
+        return 1; /* we got a frame, exit */
+        break;
+      }
+    case FLEXCAN_MB_CODE_TX_INACTIVE: {       // TX inactive. Just chillin' waiting for a message to send.
+        FLEXCAN0_IFLAG1 = (1UL << mailbox_check); /* immediately flush interrupt of current mailbox */
+        if ( ++mailbox_check > 15 ) mailbox_check = 0U;
+        if ( ++cycle_count > 2 ) return 0; /* we skipped over enough TX buffers to check all RX mailboxes */
+        goto rescan_flexcan_rx_mailboxes;
+      }
+    case FLEXCAN_MB_CODE_RX_BUSY:           // mailbox is busy, check it later.
+    case FLEXCAN_MB_CODE_RX_INACTIVE:       // inactive Receive box. Must be a false alarm!?
+    case FLEXCAN_MB_CODE_RX_EMPTY:          // rx empty already. Why did it interrupt then?
+    case FLEXCAN_MB_CODE_TX_ABORT:          // TX being aborted.
+    case FLEXCAN_MB_CODE_TX_RESPONSE:       // remote request response (deprecated)
+    case FLEXCAN_MB_CODE_TX_ONCE:           // TX mailbox is full and will be sent as soon as possible
+    case FLEXCAN_MB_CODE_TX_RESPONSE_TEMPO: // remote request junk again. Go away.
+      break;
+    default:
+      break;
+  }
+  if ( ++mailbox_check > 15 ) mailbox_check = 0U;
+  return 0;
+}
+
+
+
+void can0_message_isr (void) {
+  CAN_message_t msg; // setup a temporary storage buffer
+  uint32_t status = FLEXCANb_IFLAG1(FLEXCAN0_BASE);
+  if ( FLEXCAN0_MCR & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, capture frames */
+    if ( FLEXCAN0_IMASK1 & FLEXCAN_IMASK1_BUF5M ) {
+      msg.len = FLEXCAN_get_length(FLEXCANb_MBn_CS(FLEXCAN0_BASE, 0));
+      msg.flags.extended = (FLEXCANb_MBn_CS(FLEXCAN0_BASE, 0) & FLEXCAN_MB_CS_IDE) ? 1 : 0;
+      msg.flags.remote = (FLEXCANb_MBn_CS(FLEXCAN0_BASE, 0) & FLEXCAN_MB_CS_RTR) ? 1 : 0;
+      msg.timestamp = FLEXCAN_get_timestamp (FLEXCANb_MBn_CS(FLEXCAN0_BASE, 0));
+      msg.id = (FLEXCANb_MBn_ID(FLEXCAN0_BASE, 0) & FLEXCAN_MB_ID_EXT_MASK);
+      if (!msg.flags.extended) msg.id >>= FLEXCAN_MB_ID_STD_BIT_NO;
+      uint32_t dataIn = FLEXCANb_MBn_WORD0(FLEXCAN0_BASE, 0);
+      msg.buf[0] = dataIn >> 24; msg.buf[1] = dataIn >> 16; msg.buf[2] = dataIn >> 8; msg.buf[3] = dataIn;
+      dataIn = FLEXCANb_MBn_WORD1(FLEXCAN0_BASE, 0);
+      msg.buf[4] = dataIn >> 24; msg.buf[5] = dataIn >> 16; msg.buf[6] = dataIn >> 8; msg.buf[7] = dataIn;
+      FLEXCAN0_IFLAG1 = FLEXCAN_IMASK1_BUF5M; /* clear FIFO bit only! */
+      if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(msg);
+    }
+    status &= ~FLEXCAN_IMASK1_BUF5M; /* remove bit from initial flag lookup so it's not set at end when another frame is captured */
+  }
+  /* non FIFO mailbox handling */
+  uint8_t mailboxes = 0;
+  if ( FLEXCAN0_MCR & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, get only remaining RX (if any) */
+    uint32_t remaining_mailboxes = 10 /* MAXMB - FIFO */ - ((((FLEXCAN0_CTRL2 >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    mailboxes = 16 - remaining_mailboxes;
+  }
+  /* non FIFO mailbox handling complete */
+  /* mailbox handling routine */
+  for (uint8_t i = mailboxes; i < 16; i++) {
+    if (!(status & (1 << i))) continue; // skip mailboxes that haven't triggered an interrupt
+    uint32_t code = FLEXCAN_get_code(FLEXCANb_MBn_CS(FLEXCAN0_BASE, i)); // Reading Control Status atomically locks mailbox.
+    switch ( code ) {
+      case FLEXCAN_MB_CODE_RX_FULL:           // rx full, Copy the frame to RX buffer
+      case FLEXCAN_MB_CODE_RX_OVERRUN: {      // rx overrun. Incomming frame overwrote existing frame.
+          msg.len = FLEXCAN_get_length(FLEXCANb_MBn_CS(FLEXCAN0_BASE, i));
+          msg.flags.extended = (FLEXCANb_MBn_CS(FLEXCAN0_BASE, i) & FLEXCAN_MB_CS_IDE) ? 1 : 0;
+          msg.flags.remote = (FLEXCANb_MBn_CS(FLEXCAN0_BASE, i) & FLEXCAN_MB_CS_RTR) ? 1 : 0;
+          msg.timestamp = FLEXCAN_get_timestamp (FLEXCANb_MBn_CS(FLEXCAN0_BASE, i));
+          msg.id = (FLEXCANb_MBn_ID(FLEXCAN0_BASE, i) & FLEXCAN_MB_ID_EXT_MASK);
+          if (!msg.flags.extended) msg.id >>= FLEXCAN_MB_ID_STD_BIT_NO;
+          uint32_t dataIn = FLEXCANb_MBn_WORD0(FLEXCAN0_BASE, i);
+          msg.buf[0] = dataIn >> 24; msg.buf[1] = dataIn >> 16; msg.buf[2] = dataIn >> 8; msg.buf[3] = dataIn;
+          dataIn = FLEXCANb_MBn_WORD1(FLEXCAN0_BASE, i);
+          msg.buf[4] = dataIn >> 24; msg.buf[5] = dataIn >> 16; msg.buf[6] = dataIn >> 8; msg.buf[7] = dataIn;
+          msg.mb = i; /* store the mailbox the message came from (for callback reference) */
+          if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(msg);
+          sendMSGtoIndividualMBCallback((IFCTMBNUM)i, msg);
+          if (!msg.flags.extended) FLEXCANb_MBn_CS(FLEXCAN0_BASE, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY);
+          else FLEXCANb_MBn_CS(FLEXCAN0_BASE, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY) | FLEXCAN_MB_CS_SRR | FLEXCAN_MB_CS_IDE;
+          FLEXCAN0_TIMER; // reading timer unlocks individual mailbox
+          FLEXCAN0_IFLAG1 = (1UL << i); /* immediately flush interrupt of current mailbox */
+          status &= ~(1 << i); /* remove bit from initial flag lookup so it's not set at end when another frame is captured */
+          break;
+        }
+      case FLEXCAN_MB_CODE_TX_INACTIVE: {       // TX inactive. Just chillin' waiting for a message to send.
+          FLEXCAN0_IFLAG1 = (1UL << i); /* immediately flush interrupt of current mailbox */
+          status &= ~(1 << i); /* remove bit from initial flag lookup so it's not set at end when another frame is captured */
+          continue; /* skip mailboxes that are TX */
+        }
+      case FLEXCAN_MB_CODE_RX_BUSY:           // mailbox is busy, check it later.
+      case FLEXCAN_MB_CODE_RX_INACTIVE:       // inactive Receive box. Must be a false alarm!?
+      case FLEXCAN_MB_CODE_RX_EMPTY:          // rx empty already. Why did it interrupt then?
+      case FLEXCAN_MB_CODE_TX_ABORT:          // TX being aborted.
+      case FLEXCAN_MB_CODE_TX_RESPONSE:       // remote request response (deprecated)
+      case FLEXCAN_MB_CODE_TX_ONCE:           // TX mailbox is full and will be sent as soon as possible
+      case FLEXCAN_MB_CODE_TX_RESPONSE_TEMPO: // remote request junk again. Go away.
+        break;
+      default:
+        break;
+    }
+  }
+  FLEXCAN0_IFLAG1 = status; /* essentially, if all bits were cleared above, it's basically writing 0 to IFLAG, to prevent new data interruptions. */
+}
+
+
+
+
+void IFCT::mailboxStatus() {
+  if ( FLEXCAN0_MCR & FLEXCAN_MCR_FEN ) {
+    Serial.print("FIFO Enabled --> "); ( FLEXCAN0_IMASK1 & FLEXCAN_IMASK1_BUF5M ) ? Serial.println("Interrupt Enabled") : Serial.println("Interrupt Disabled");
+    Serial.print("\tFIFO Filters in use: ");
+    Serial.println((((FLEXCAN0_CTRL2 >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 8); // 8 filters per 2 mailboxes
+    Serial.print("\tRemaining Mailboxes: ");
+    uint32_t remaining_mailboxes = 10 /* MAXMB - FIFO */ - ((((FLEXCAN0_CTRL2 >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    Serial.println(remaining_mailboxes); // 8 filters per 2 mailboxes
+    for ( uint8_t i = 16 - remaining_mailboxes; i < 16; i++ ) {
+      switch ( FLEXCAN_get_code(FLEXCANb_MBn_CS(FLEXCAN0_BASE, i)) ) {
+        case 0b0000: {
+            Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: RX_INACTIVE"); break;
+          }
+        case 0b0100: {
+            Serial.print("\t\tMB"); Serial.print(i); Serial.print(" code: RX_EMPTY");
+            (FLEXCANb_MBn_CS(FLEXCAN0_BASE, i) & FLEXCAN_MB_CS_IDE) ? Serial.println("\t(Extended Frame)") : Serial.println("\t(Standard Frame)");
+            break;
+          }
+        case 0b0010: {
+            Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: RX_FULL"); break;
+          }
+        case 0b0110: {
+            Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: RX_OVERRUN"); break;
+          }
+        case 0b1010: {
+            Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: RX_RANSWER"); break;
+          }
+        case 0b0001: {
+            Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: RX_BUSY"); break;
+          }
+        case 0b1000: {
+            Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: TX_INACTIVE"); break;
+          }
+        case 0b1001: {
+            Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: TX_ABORT"); break;
+          }
+        case 0b1100: {
+            Serial.print("\t\tMB"); Serial.print(i); Serial.print(" code: TX_DATA (Transmitting)");
+            uint32_t extid = (FLEXCANb_MBn_CS(FLEXCAN0_BASE, i) & FLEXCAN_MB_CS_IDE);
+            (extid) ? Serial.print("(Extended Frame)") : Serial.print("(Standard Frame)");
+            uint32_t dataIn = FLEXCANb_MBn_WORD0(FLEXCAN0_BASE, i);
+            uint32_t id = (FLEXCANb_MBn_ID(FLEXCAN0_BASE, i) & FLEXCAN_MB_ID_EXT_MASK);
+            if (!extid) id >>= FLEXCAN_MB_ID_STD_BIT_NO;
+            Serial.print("(ID: 0x"); Serial.print(id, HEX); Serial.print(")");
+            Serial.print("(Payload: "); Serial.print((uint8_t)(dataIn >> 24), HEX);
+            Serial.print(" "); Serial.print((uint8_t)(dataIn >> 16), HEX);
+            Serial.print(" "); Serial.print((uint8_t)(dataIn >> 8), HEX);
+            Serial.print(" "); Serial.print((uint8_t)dataIn, HEX);
+            dataIn = FLEXCANb_MBn_WORD1(FLEXCAN0_BASE, i);
+            Serial.print(" "); Serial.print((uint8_t)(dataIn >> 24), HEX);
+            Serial.print(" "); Serial.print((uint8_t)(dataIn >> 16), HEX);
+            Serial.print(" "); Serial.print((uint8_t)(dataIn >> 8), HEX);
+            Serial.print(" "); Serial.print((uint8_t)dataIn, HEX);
+            Serial.println(")");
+            break;
+          }
+        case 0b1110: {
+            Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: TX_TANSWER"); break;
+          }
+      }
+    } // for loop
+    return;
+  } // fifo detected ends here
+  Serial.print("FIFO Disabled\n\tMailboxes:\n");
+  for ( uint8_t i = 0; i < 16; i++ ) {
+    switch ( FLEXCAN_get_code(FLEXCANb_MBn_CS(FLEXCAN0_BASE, i)) ) {
+      case 0b0000: {
+          Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: RX_INACTIVE"); break;
+        }
+      case 0b0100: {
+          Serial.print("\t\tMB"); Serial.print(i); Serial.print(" code: RX_EMPTY");
+          (FLEXCANb_MBn_CS(FLEXCAN0_BASE, i) & FLEXCAN_MB_CS_IDE) ? Serial.println("\t(Extended Frame)") : Serial.println("\t(Standard Frame)");
+          break;
+        }
+      case 0b0010: {
+          Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: RX_FULL"); break;
+        }
+      case 0b0110: {
+          Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: RX_OVERRUN"); break;
+        }
+      case 0b1010: {
+          Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: RX_RANSWER"); break;
+        }
+      case 0b0001: {
+          Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: RX_BUSY"); break;
+        }
+      case 0b1000: {
+          Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: TX_INACTIVE"); break;
+        }
+      case 0b1001: {
+          Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: TX_ABORT"); break;
+        }
+      case 0b1100: {
+          Serial.print("\t\tMB"); Serial.print(i); Serial.print(" code: TX_DATA (Transmitting)");
+          uint32_t extid = (FLEXCANb_MBn_CS(FLEXCAN0_BASE, i) & FLEXCAN_MB_CS_IDE);
+          (extid) ? Serial.print("(Extended Frame)") : Serial.print("(Standard Frame)");
+          uint32_t dataIn = FLEXCANb_MBn_WORD0(FLEXCAN0_BASE, i);
+          uint32_t id = (FLEXCANb_MBn_ID(FLEXCAN0_BASE, i) & FLEXCAN_MB_ID_EXT_MASK);
+          if (!extid) id >>= FLEXCAN_MB_ID_STD_BIT_NO;
+          Serial.print("(ID: 0x"); Serial.print(id, HEX); Serial.print(")");
+          Serial.print("(Payload: "); Serial.print((uint8_t)(dataIn >> 24), HEX);
+          Serial.print(" "); Serial.print((uint8_t)(dataIn >> 16), HEX);
+          Serial.print(" "); Serial.print((uint8_t)(dataIn >> 8), HEX);
+          Serial.print(" "); Serial.print((uint8_t)dataIn, HEX);
+          dataIn = FLEXCANb_MBn_WORD1(FLEXCAN0_BASE, i);
+          Serial.print(" "); Serial.print((uint8_t)(dataIn >> 24), HEX);
+          Serial.print(" "); Serial.print((uint8_t)(dataIn >> 16), HEX);
+          Serial.print(" "); Serial.print((uint8_t)(dataIn >> 8), HEX);
+          Serial.print(" "); Serial.print((uint8_t)dataIn, HEX);
+          Serial.println(")");
+          break;
+        }
+      case 0b1110: {
+          Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: TX_TANSWER"); break;
+        }
+    }
+  } // for loop
+}
