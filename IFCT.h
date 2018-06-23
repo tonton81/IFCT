@@ -27,7 +27,7 @@
 */
 
 
-#ifndef _IFCT_H_
+#if !defined(_IFCT_H_) && ( defined(__MK20DX256__) || defined(__MK64FX512__) || defined(__MK66FX1M0__) )
 #define _IFCT_H_
 #include <kinetis_flexcan.h>
 #include <kinetis.h>
@@ -36,6 +36,8 @@
 #define rtr flags.remote
 #define FLEXCANb_MCR(b)  (*(vuint32_t*)(b))
 #define FLEXCANb_CTRL1(b)(*(vuint32_t*)(b+4))
+#define FLEXCANb_TIMER(b)(*(vuint32_t*)(b+8))
+#define FLEXCANb_CTRL2(b)(*(vuint32_t*)(b+0x34))
 #define FLEXCANb_RXMGMASK(b)              (*(vuint32_t*)(b+0x10))
 #define FLEXCANb_IFLAG1(b)                (*(vuint32_t*)(b+0x30))
 #define FLEXCANb_IMASK1(b)                (*(vuint32_t*)(b+0x28))
@@ -90,14 +92,13 @@ typedef enum IFCTMBIDE {
   NONE = 0,
   IDE = 1,
 } IFCTMBIDE;
+typedef enum IFCTALTPIN {
+  ALT = 0,
+  DEF = 1,
+} IFCTALTPIN;
 
 
-
-
-typedef void (*_MB_ptr)(const CAN_message_t &msg);
-
-
-
+typedef void (*_MB_ptr)(const CAN_message_t &msg); /* mailbox / global callbacks */
 
 
 class IFCT {
@@ -135,12 +136,19 @@ class IFCT {
     bool pollFIFO(CAN_message_t &msg, bool poll = 1);
     int write(const CAN_message_t &msg);
     int read(CAN_message_t &msg);
-
+    void IFCT_message_ISR(void);
+    void setTX(IFCTALTPIN which = DEF);
+    void setRX(IFCTALTPIN which = DEF);
+    void MRP(bool mrp = 1); /* mailbox(1)/fifo(0) priority */
+    void RRS(bool rrs = 1); /* store remote frames */
   private:
-
+    uint32_t _baseAddress = FLEXCAN0_BASE;
+    uint32_t NVIC_IRQ = 0UL;
     void softReset();
     void FLEXCAN_EnterFreezeMode();
     void FLEXCAN_ExitFreezeMode();
 
 };
+extern IFCT Can0;
+extern IFCT Can1;
 #endif
