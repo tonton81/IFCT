@@ -580,7 +580,7 @@ void can0_message_isr (void) {
   Can0.IFCT_message_ISR();
 }
 void can1_message_isr (void) {
-  //Can1.IFCT_message_ISR();
+  Can1.IFCT_message_ISR();
 }
 
 
