@@ -49,7 +49,7 @@
 #define FLEXCANb_IDFLT_TAB(b, n)          (*(vuint32_t*)(b+0xE0+(n*4)))
 #define FLEXCANb_MB_MASK(b, n)            (*(vuint32_t*)(b+0x880+(n*4)))
 #define FLEXCANb_ESR1(b) (*(vuint32_t*)(b+0x20))
-#define FLEXCANb_MAXMB_SIZE(b)            ((b & FLEXCAN_MCR_MAXMB_MASK) & 0xF)
+#define FLEXCANb_MAXMB_SIZE(b)            (((FLEXCANb_MCR(b) & FLEXCAN_MCR_MAXMB_MASK) & 0x7F)+1)
 
 typedef struct CAN_message_t {
   uint32_t id;          // can identifier
@@ -139,9 +139,13 @@ class IFCT {
     void IFCT_message_ISR(void);
     void setTX(IFCTALTPIN which = DEF);
     void setRX(IFCTALTPIN which = DEF);
-    void MRP(bool mrp = 1); /* mailbox(1)/fifo(0) priority */
-    void RRS(bool rrs = 1); /* store remote frames */
+    void setMRP(bool mrp = 1); /* mailbox(1)/fifo(0) priority */
+    void setRRS(bool rrs = 1); /* store remote frames */
+    void setMaxMB(uint8_t last = 16);
+
+
   private:
+    const uint32_t max_mb_size = 16; /* T3.2, T3.5, T3.6 */
     uint32_t _baseAddress = FLEXCAN0_BASE;
     uint32_t NVIC_IRQ = 0UL;
     void softReset();
