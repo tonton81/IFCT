@@ -57,6 +57,12 @@ IFCT Can1 = IFCT(1000000,FLEXCAN1_BASE);
 
 
 IFCT::IFCT(uint32_t baud, uint32_t base) {
+
+  Serial.begin(115200); // usb serial
+  NVIC_SET_PRIORITY(IRQ_USBOTG, 0);
+
+
+
   _baseAddress = base;
 #if !defined(__MK20DX256__) && !defined(__MK64FX512__) && !defined(__MK66FX1M0__)
   return; /* mcu not supported */
@@ -88,6 +94,7 @@ IFCT::IFCT(uint32_t baud, uint32_t base) {
   softReset(); /* reset bus */
   while (!(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FRZ_ACK));
   FLEXCANb_MCR(_baseAddress) |= FLEXCAN_MCR_SRX_DIS; /* Disable self-reception */
+
   disableFIFO();
   disableFIFOInterrupt();
   setBaudRate(baud);
@@ -95,12 +102,13 @@ IFCT::IFCT(uint32_t baud, uint32_t base) {
   FLEXCANb_CTRL2(_baseAddress) |= FLEXCAN_CTRL2_RRS | // store remote frames
                     FLEXCAN_CTRL2_MRP; // mailbox > FIFO priority.
   FLEXCANb_MCR(_baseAddress) &= ~FLEXCAN_MCR_HALT; /* start the CAN */
+
   while (FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FRZ_ACK);
   while (FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_NOT_RDY); /* wait until ready */
 
   setRX(); setTX();
 
-  NVIC_SET_PRIORITY(NVIC_IRQ, 0); /* set interrupt priority */
+  NVIC_SET_PRIORITY(NVIC_IRQ, 1); /* set interrupt priority */
   NVIC_ENABLE_IRQ(NVIC_IRQ); /* enable message interrupt */
 }
  
@@ -126,13 +134,13 @@ void IFCT::enableFIFO(bool status) {
   }
   FLEXCANb_MCR(_baseAddress) &= ~FLEXCAN_MCR_FEN; // Disable FIFO if already enabled for cleanup.
   FLEXCANb_IMASK1(_baseAddress) = 0UL; // disable all FIFO/MB Interrupts
-  for (uint8_t i = 0; i < 16; i++ ) { // clear all mailboxes
+  for (uint8_t i = 0; i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++ ) { // clear all mailboxes
     FLEXCANb_MBn_ID(_baseAddress, i) = 0x00000000;
     FLEXCANb_MBn_WORD0(_baseAddress, i) = 0x00000000;
     FLEXCANb_MBn_WORD1(_baseAddress, i) = 0x00000000;
     FLEXCANb_MBn_CS(_baseAddress, i) = 0x00000000;
   }
-  for ( uint8_t i = 0; i < 16; i++ ) FLEXCANb_MB_MASK(_baseAddress, i) = 0; // CLEAR MAILBOX MASKS (RXIMR)
+  for ( uint8_t i = 0; i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++ ) FLEXCANb_MB_MASK(_baseAddress, i) = 0; // CLEAR MAILBOX MASKS (RXIMR)
   /*
     RXMGMASK is provided for legacy application support.
     •  When the MCR[IRMQ] bit is negated, RXMGMASK is always in effect.
@@ -152,17 +160,19 @@ void IFCT::enableFIFO(bool status) {
   FLEXCANb_IFLAG1(_baseAddress) = FLEXCANb_IFLAG1(_baseAddress); // (all bits reset when written back)
   if ( status ) {
     FLEXCANb_MCR(_baseAddress) |= FLEXCAN_MCR_FEN;
+//QUICKFIND-KEYWORD
     /*
       Each group of eight filters occupies a memory space equivalent to two Message Buffers which
       means that the more filters are implemented the less Mailboxes will be available.
     */
     FLEXCAN_set_rffn(FLEXCANb_CTRL2(_baseAddress), 0); // setup 8 Filters for FIFO, 0-5 = FIFO, 6-7 FILTER, 8-16 MBs, max value 0x3 which leaves MB14/15 free to use.
     // Setup TX mailboxes from 8 -> 15, FIFO uses the first 8 (6MB for FIFO, 2MB for 8 filters for FIFO).
-    uint32_t remaining_mailboxes = 10 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
-    for (int i = remaining_mailboxes; i < 16; i++) FLEXCANb_MBn_CS(_baseAddress,i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_INACTIVE);
-  }
+    uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+    for (uint8_t i = remaining_mailboxes; i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++) FLEXCANb_MBn_CS(_baseAddress,i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_INACTIVE);
+  } 
   else { // FIFO disabled default setup of mailboxes, 0-7 RX, 8-15 TX
-    for (uint8_t i = 0; i < 16; i++ ) { // clear all mailboxes
+    for (uint8_t i = 0; i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++ ) { // clear all mailboxes
       if ( i < 8 ) {
         FLEXCANb_MBn_ID(_baseAddress, i) = 0x00000000;
         FLEXCANb_MBn_WORD0(_baseAddress, i) = 0x00000000;
@@ -263,8 +273,9 @@ void IFCT::setBaudRate(uint32_t baud) {
 
 void IFCT::setMB(const IFCTMBNUM &mb_num, const IFCTMBTXRX &mb_rx_tx, const IFCTMBIDE &ide) {
   if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) {
-    uint32_t remaining_mailboxes = 10 /* MAXMB(16) - FIFO(6) */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
-    if ( mb_num < ( 16 - remaining_mailboxes ) ) {
+    uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB(16) - FIFO(6) */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+    if ( mb_num < ( FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes ) ) {
       Serial.println("Mailbox not available"); return;
     }
   }
@@ -289,8 +300,9 @@ void IFCT::setMB(const IFCTMBNUM &mb_num, const IFCTMBTXRX &mb_rx_tx, const IFCT
 }
 void IFCT::enableMBInterrupt(const IFCTMBNUM &mb_num, bool status) {
   if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) {
-    uint32_t remaining_mailboxes = 10 /* MAXMB(16) - FIFO(6) */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
-    if ( mb_num < ( 16 - remaining_mailboxes ) ) {
+    uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB(16) - FIFO(6) */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+    if ( mb_num < ( FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes ) ) {
       Serial.println("Mailbox not available"); return;
     }
   }
@@ -306,6 +318,33 @@ void IFCT::disableMBInterrupt(const IFCTMBNUM &mb_num) {
   enableMBInterrupt(mb_num, 0);
 }
 
+
+void IFCT::setMaxMB(uint8_t last) {
+
+#if defined(__MK20DX256__) || defined(__MK64FX512__) || defined(__MK66FX1M0__) 
+  last = constrain(last,1,16);
+  last--;
+#endif
+
+  FLEXCAN_EnterFreezeMode();
+  bool fifo_was_cleared = 0;
+
+  if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) {
+    disableFIFO(); /* let fifo clear current mailboxes */
+    fifo_was_cleared = 1;
+  }
+  else disableFIFO();
+  
+  FLEXCANb_IFLAG1(_baseAddress) = FLEXCANb_IFLAG1(_baseAddress); // (all bits reset when written back) (needed for MAXMB changes)
+  FLEXCANb_MCR(_baseAddress) &= ~FLEXCAN_MCR_MAXMB_MASK; // disable mailboxes
+  FLEXCANb_MCR(_baseAddress) |= FLEXCAN_MCR_MAXMB(last); // set mailbox max
+
+  if ( fifo_was_cleared ) enableFIFO();
+
+  FLEXCAN_ExitFreezeMode();
+}
+
+
 void IFCT::FLEXCAN_EnterFreezeMode() {
   FLEXCANb_MCR(_baseAddress) |= FLEXCAN_MCR_HALT;
   while (!(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FRZ_ACK));
@@ -316,14 +355,14 @@ void IFCT::FLEXCAN_ExitFreezeMode() {
   while (FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FRZ_ACK);
 }
 
-void IFCT::MRP(bool mrp) { /* mailbox priority (1) or FIFO priority (0) */
+void IFCT::setMRP(bool mrp) { /* mailbox priority (1) or FIFO priority (0) */
   FLEXCAN_EnterFreezeMode();
   if ( mrp ) FLEXCANb_CTRL2(_baseAddress) |= FLEXCAN_CTRL2_MRP;
   else FLEXCANb_CTRL2(_baseAddress) &= ~FLEXCAN_CTRL2_MRP;
   FLEXCAN_ExitFreezeMode();
 }
 
-void IFCT::RRS(bool rrs) { /* store remote frames */
+void IFCT::setRRS(bool rrs) { /* store remote frames */
   FLEXCAN_EnterFreezeMode();
   if ( rrs ) FLEXCANb_CTRL2(_baseAddress) |= FLEXCAN_CTRL2_RRS;
   else FLEXCANb_CTRL2(_baseAddress) &= ~FLEXCAN_CTRL2_RRS;
@@ -488,10 +527,11 @@ int IFCT::write(const CAN_message_t &msg) {
 retry_tx_flexcan:
   uint8_t mailboxes = 0;
   if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, get only remaining TX (if any) */
-    uint32_t remaining_mailboxes = 10 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
-    mailboxes = 16 - remaining_mailboxes;
+    uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+    mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
   }
-  for (uint8_t i = mailboxes; i < 16; i++) {
+  for (uint8_t i = mailboxes; i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++) {
     if ( FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, i)) == FLEXCAN_MB_CODE_TX_INACTIVE ) {
       if (msg.flags.extended) FLEXCANb_MBn_ID(_baseAddress, i) = (msg.id & FLEXCAN_MB_ID_EXT_MASK);
       else FLEXCANb_MBn_ID(_baseAddress, i) = FLEXCAN_MB_ID_IDSTD(msg.id);
@@ -517,15 +557,17 @@ rescan_flexcan_rx_mailboxes:
   uint32_t status = FLEXCANb_IFLAG1(_baseAddress), timeout = millis();
 
   if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, get only remaining RX (if any) */
-    uint32_t remaining_mailboxes = 10 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
-    mailbox_check = 16 - remaining_mailboxes;
+    uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+    mailbox_check = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
   }
   while (!(status & (1 << mailbox_check))) {
     if ( ++mailbox_check > 15 ) {
       mailbox_check = 0U; // skip mailboxes that haven't triggered an interrupt
       if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) {  /* FIFO is enabled, get only remaining RX (if any) */
-        uint32_t remaining_mailboxes = 10 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
-        mailbox_check = 16 - remaining_mailboxes;
+        uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+        if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+        mailbox_check = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
       }
     }
     if ( millis() - timeout > 100 ) return 0; /* no frames available */
@@ -587,7 +629,7 @@ void can1_message_isr (void) {
 void IFCT::IFCT_message_ISR(void) {
   CAN_message_t msg; // setup a temporary storage buffer
   uint32_t status = FLEXCANb_IFLAG1(_baseAddress);
-  if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, capture frames */
+  if ( status & FLEXCAN_IFLAG1_BUF5I && FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, capture frames if triggered */
     if ( FLEXCANb_IMASK1(_baseAddress) & FLEXCAN_IFLAG1_BUF5I ) {
       msg.len = FLEXCAN_get_length(FLEXCANb_MBn_CS(_baseAddress, 0));
       msg.flags.extended = (FLEXCANb_MBn_CS(_baseAddress, 0) & FLEXCAN_MB_CS_IDE) ? 1 : 0;
@@ -616,12 +658,13 @@ void IFCT::IFCT_message_ISR(void) {
   /* non FIFO mailbox handling */
   uint8_t mailboxes = 0;
   if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, get only remaining RX (if any) */
-    uint32_t remaining_mailboxes = 10 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
-    mailboxes = 16 - remaining_mailboxes;
+    uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+    mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
   }
   /* non FIFO mailbox handling complete */
   /* mailbox handling routine */
-  for (uint8_t i = mailboxes; i < 16; i++) {
+  for (uint8_t i = mailboxes; i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++) {
     if (!(status & (1 << i))) continue; // skip mailboxes that haven't triggered an interrupt
     uint32_t code = FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, i)); // Reading Control Status atomically locks mailbox.
     switch ( code ) {
@@ -676,9 +719,10 @@ void IFCT::mailboxStatus() {
     Serial.print("\tFIFO Filters in use: ");
     Serial.println((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 8); // 8 filters per 2 mailboxes
     Serial.print("\tRemaining Mailboxes: ");
-    uint32_t remaining_mailboxes = 10 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
     Serial.println(remaining_mailboxes); // 8 filters per 2 mailboxes
-    for ( uint8_t i = 16 - remaining_mailboxes; i < 16; i++ ) {
+    for ( uint8_t i = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes; i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++ ) {
       switch ( FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, i)) ) {
         case 0b0000: {
             Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: RX_INACTIVE"); break;
@@ -734,7 +778,7 @@ void IFCT::mailboxStatus() {
     return;
   } // fifo detected ends here
   Serial.print("FIFO Disabled\n\tMailboxes:\n");
-  for ( uint8_t i = 0; i < 16; i++ ) {
+  for ( uint8_t i = 0; i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++ ) {
     switch ( FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, i)) ) {
       case 0b0000: {
           Serial.print("\t\tMB"); Serial.print(i); Serial.println(" code: RX_INACTIVE"); break;
