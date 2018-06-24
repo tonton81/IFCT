@@ -53,7 +53,9 @@ _MB_ptr IFCT::_MBAllhandler = nullptr;
 
 
 IFCT Can0 = IFCT(1000000,FLEXCAN0_BASE);
+#if defined(__MK66FX1M0__)
 IFCT Can1 = IFCT(1000000,FLEXCAN1_BASE);
+#endif
 
 
 IFCT::IFCT(uint32_t baud, uint32_t base) {
