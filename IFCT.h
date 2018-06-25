@@ -65,6 +65,17 @@ typedef struct CAN_message_t {
   uint8_t mb = 0;       // used to identify mailbox reception
 } CAN_message_t;
 
+
+typedef struct CAN_filter_t {
+    uint32_t id;
+    struct {
+        uint8_t extended:1;  // identifier is extended (29-bit)
+        uint8_t remote:1;    // remote transmission request packet type
+        uint8_t reserved:6;
+    } flags;
+} CAN_filter_t;
+
+
 typedef enum IFCTMBNUM {
   MB0 = 0,
   MB1 = 1,
@@ -96,6 +107,10 @@ typedef enum IFCTALTPIN {
   ALT = 0,
   DEF = 1,
 } IFCTALTPIN;
+typedef enum IFCTMBFLTEN {
+  ACCEPT_ALL = 0,
+  REJECT_ALL = 1
+} IFCTMBFLTEN;
 
 
 typedef void (*_MB_ptr)(const CAN_message_t &msg); /* mailbox / global callbacks */
@@ -142,7 +157,13 @@ class IFCT {
     void setMRP(bool mrp = 1); /* mailbox(1)/fifo(0) priority */
     void setRRS(bool rrs = 1); /* store remote frames */
     void setMaxMB(uint8_t last = 16);
-
+    void setMBFilter(IFCTMBFLTEN input); /* enable/disable traffic for all MBs (for individual masking) */
+    void setMBFilter(IFCTMBNUM mb_num, IFCTMBFLTEN input); /* set specific MB to accept/deny traffic */
+    void setMBFilter(IFCTMBNUM mb_num, uint32_t id1); /* input 1 ID to be filtered */
+    void setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2); /* input 2 ID's to be filtered */
+    void setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3); /* input 3 ID's to be filtered */
+    void setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4); /* input 4 ID's to be filtered */
+    void setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4, uint32_t id5); /* input 5 ID's to be filtered */
 
   private:
     const uint32_t max_mb_size = 16; /* T3.2, T3.5, T3.6 */
@@ -151,6 +172,7 @@ class IFCT {
     void softReset();
     void FLEXCAN_EnterFreezeMode();
     void FLEXCAN_ExitFreezeMode();
+    void setMBFilterProcessing(IFCTMBNUM mb_num, uint32_t filter_id, uint32_t calculated_mask);
 
 };
 extern IFCT Can0;
