@@ -929,42 +929,6 @@ void IFCT::setMBFilter(IFCTMBNUM mb_num, IFCTMBFLTEN input) {
 
 
 void IFCT::setMBFilter(IFCTMBNUM mb_num, uint32_t id1) {
-  uint32_t mask = 0;
-  if (!(FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE)) mask = ((((id1) ^ (id1)) ^ 0xFFFFFFFF) << 18 );
-  else mask = ((((id1) ^ (id1)) ^ 0xFFFFFFFF) << 0 );
-  setMBFilterProcessing(mb_num,id1,mask);
-}
-
-void IFCT::setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2) {
-  uint32_t mask = 0;
-  if (!(FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE)) mask = ((((id1 | id2) ^ (id1 & id2)) ^ 0xFFFFFFFF) << 18 );
-  else mask = ((((id1 | id2) ^ (id1 & id2)) ^ 0xFFFFFFFF) << 0 );
-  setMBFilterProcessing(mb_num,id1,mask);
-}
-
-void IFCT::setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3) {
-  uint32_t mask = 0;
-  if (!(FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE)) mask = ((((id1 | id2 | id3) ^ (id1 & id2 & id3)) ^ 0xFFFFFFFF) << 18 );
-  else mask = ((((id1 | id2 | id3) ^ (id1 & id2 & id3)) ^ 0xFFFFFFFF) << 0 );
-  setMBFilterProcessing(mb_num,id1,mask);
-}
-
-void IFCT::setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4) {
-  uint32_t mask = 0;
-  if (!(FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE)) mask = ((((id1 | id2 | id3 | id4) ^ (id1 & id2 & id3 & id4)) ^ 0xFFFFFFFF) << 18 );
-  else mask = ((((id1 | id2 | id3 | id4) ^ (id1 & id2 & id3 & id4)) ^ 0xFFFFFFFF) << 0 );
-  setMBFilterProcessing(mb_num,id1,mask);
-}
-
-void IFCT::setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4, uint32_t id5) {
-  uint32_t mask = 0;
-  if (!(FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE)) mask = ((((id1 | id2 | id3 | id4 | id5) ^ (id1 & id2 & id3 & id4 & id5)) ^ 0xFFFFFFFF) << 18 );
-  else mask = ((((id1 | id2 | id3 | id4 | id5) ^ (id1 & id2 & id3 & id4 & id5)) ^ 0xFFFFFFFF) << 0 );
-  setMBFilterProcessing(mb_num,id1,mask);
-}
-
-
-void IFCT::setMBFilterProcessing(IFCTMBNUM mb_num, uint32_t filter_id, uint32_t calculated_mask) {
   if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, get only remaining MBs */
     uint8_t mailboxes = 0;
     uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
@@ -972,10 +936,72 @@ void IFCT::setMBFilterProcessing(IFCTMBNUM mb_num, uint32_t filter_id, uint32_t 
     mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
     if ( mb_num < mailboxes ) return; /* mailbox not available to be set */
   }
+  uint32_t mask = 0;
+  if (!(FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE)) mask = ((((id1) ^ (id1)) ^ 0xFFFFFFFF) << 18 );
+  else mask = ((((id1) ^ (id1)) ^ 0xFFFFFFFF) << 0 );
+  setMBFilterProcessing(mb_num,id1,mask);
+}
+
+void IFCT::setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2) {
+  if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, get only remaining MBs */
+    uint8_t mailboxes = 0;
+    uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+    mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
+    if ( mb_num < mailboxes ) return; /* mailbox not available to be set */
+  }
+  uint32_t mask = 0;
+  if (!(FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE)) mask = ((((id1 | id2) ^ (id1 & id2)) ^ 0xFFFFFFFF) << 18 );
+  else mask = ((((id1 | id2) ^ (id1 & id2)) ^ 0xFFFFFFFF) << 0 );
+  setMBFilterProcessing(mb_num,id1,mask);
+}
+
+void IFCT::setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3) {
+  if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, get only remaining MBs */
+    uint8_t mailboxes = 0;
+    uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+    mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
+    if ( mb_num < mailboxes ) return; /* mailbox not available to be set */
+  }
+  uint32_t mask = 0;
+  if (!(FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE)) mask = ((((id1 | id2 | id3) ^ (id1 & id2 & id3)) ^ 0xFFFFFFFF) << 18 );
+  else mask = ((((id1 | id2 | id3) ^ (id1 & id2 & id3)) ^ 0xFFFFFFFF) << 0 );
+  setMBFilterProcessing(mb_num,id1,mask);
+}
+
+void IFCT::setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4) {
+  if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, get only remaining MBs */
+    uint8_t mailboxes = 0;
+    uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+    mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
+    if ( mb_num < mailboxes ) return; /* mailbox not available to be set */
+  }
+  uint32_t mask = 0;
+  if (!(FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE)) mask = ((((id1 | id2 | id3 | id4) ^ (id1 & id2 & id3 & id4)) ^ 0xFFFFFFFF) << 18 );
+  else mask = ((((id1 | id2 | id3 | id4) ^ (id1 & id2 & id3 & id4)) ^ 0xFFFFFFFF) << 0 );
+  setMBFilterProcessing(mb_num,id1,mask);
+}
+
+void IFCT::setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4, uint32_t id5) {
+  if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, get only remaining MBs */
+    uint8_t mailboxes = 0;
+    uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+    mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
+    if ( mb_num < mailboxes ) return; /* mailbox not available to be set */
+  }
+  uint32_t mask = 0;
+  if (!(FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE)) mask = ((((id1 | id2 | id3 | id4 | id5) ^ (id1 & id2 & id3 & id4 & id5)) ^ 0xFFFFFFFF) << 18 );
+  else mask = ((((id1 | id2 | id3 | id4 | id5) ^ (id1 & id2 & id3 & id4 & id5)) ^ 0xFFFFFFFF) << 0 );
+  setMBFilterProcessing(mb_num,id1,mask);
+}
+
+void IFCT::setMBFilterProcessing(IFCTMBNUM mb_num, uint32_t filter_id, uint32_t calculated_mask) {
   Can0.FLEXCAN_EnterFreezeMode();
   FLEXCANb_MB_MASK(_baseAddress, mb_num) = calculated_mask;
   Can0.FLEXCAN_ExitFreezeMode();
-
   if (!(FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE)) FLEXCANb_MBn_ID(_baseAddress, mb_num) = FLEXCAN_MB_ID_IDSTD(filter_id);
   else FLEXCANb_MBn_ID(_baseAddress, mb_num) = FLEXCAN_MB_ID_IDEXT(filter_id);
 }
