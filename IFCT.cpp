@@ -547,6 +547,32 @@ retry_tx_flexcan:
   return 0; /* transmit entry failed, no mailboxes available */
 }
 
+int IFCT::write(IFCTMBNUM mb_num, const CAN_message_t &msg) {
+  if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, get only remaining MBs */
+    uint8_t mailboxes = 0;
+    uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+    mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
+    if ( mb_num < mailboxes ) return 0; /* mailbox not available to transmit */
+  }
+  if ( !((FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, mb_num))) >> 3) ) return 0; /* not a transmit mailbox */
+  uint32_t timeout = millis();
+  while( FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, mb_num)) != FLEXCAN_MB_CODE_TX_INACTIVE ) {
+    if ( millis() - timeout > 100 ) return 0; /* we exit out on a timeout */
+  }
+  if (msg.flags.extended) FLEXCANb_MBn_ID(_baseAddress, mb_num) = (msg.id & FLEXCAN_MB_ID_EXT_MASK);
+  else FLEXCANb_MBn_ID(_baseAddress, mb_num) = FLEXCAN_MB_ID_IDSTD(msg.id);
+  FLEXCANb_MBn_WORD0(_baseAddress, mb_num) = (msg.buf[0] << 24) | (msg.buf[1] << 16) | (msg.buf[2] << 8) | msg.buf[3];
+  FLEXCANb_MBn_WORD1(_baseAddress, mb_num) = (msg.buf[4] << 24) | (msg.buf[5] << 16) | (msg.buf[6] << 8) | msg.buf[7];
+  FLEXCANb_MBn_CS(_baseAddress, mb_num) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_ONCE) |
+                                      FLEXCAN_MB_CS_LENGTH(msg.len) |
+                                      ((msg.flags.remote) ? FLEXCAN_MB_CS_RTR : 0UL) |
+                                      ((msg.flags.extended) ? FLEXCAN_MB_CS_IDE : 0UL) |
+                                      ((msg.flags.extended) ? FLEXCAN_MB_CS_SRR : 0UL);
+  return 1; // transmit entry accepted //
+}
+
+
 
 int IFCT::read(CAN_message_t &msg) {
   static uint8_t mailbox_check = 0; /* incremental counter we use to sweep accross mailboxes evenly every call */
