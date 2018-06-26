@@ -149,7 +149,8 @@ class IFCT {
     static _MB_ptr _MB15handler; 
     static _MB_ptr _MBAllhandler; 
     bool pollFIFO(CAN_message_t &msg, bool poll = 1);
-    int write(const CAN_message_t &msg);
+    int write(const CAN_message_t &msg); /* use any available mailbox for transmitting */
+    int write(IFCTMBNUM mb_num, const CAN_message_t &msg); /* use a single mailbox for transmitting */
     int read(CAN_message_t &msg);
     void IFCT_message_ISR(void);
     void setTX(IFCTALTPIN which = DEF);
