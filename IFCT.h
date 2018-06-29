@@ -31,6 +31,8 @@
 #define _IFCT_H_
 #include <kinetis_flexcan.h>
 #include <kinetis.h>
+#include "Arduino.h"
+#include "circular_buffer.h"
 
 #define ext flags.extended
 #define rtr flags.remote
@@ -51,6 +53,8 @@
 #define FLEXCANb_ESR1(b) (*(vuint32_t*)(b+0x20))
 #define FLEXCANb_MAXMB_SIZE(b)            (((FLEXCANb_MCR(b) & FLEXCAN_MCR_MAXMB_MASK) & 0x7F)+1)
 
+#define FLEXCAN_BUFFER_SIZE 16
+
 typedef struct CAN_message_t {
   uint32_t id;          // can identifier
   uint16_t timestamp;   // FlexCAN time when message arrived
@@ -63,6 +67,7 @@ typedef struct CAN_message_t {
   uint8_t len = 0;      // length of data
   uint8_t buf[8];       // data
   uint8_t mb = 0;       // used to identify mailbox reception
+  uint8_t bus = 0;      // used to identify where the message came from when events() is used.
 } CAN_message_t;
 
 
@@ -166,9 +171,13 @@ class IFCT {
     void setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4); /* input 4 ID's to be filtered */
     void setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4, uint32_t id5); /* input 5 ID's to be filtered */
     void setMBFilterRange(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2); /* filter a range of ids */
+    void events();
+    static Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> flexcan_buffer; /* create an array buffer of struct size, 16 levels deep. */
 
   private:
-    const uint32_t max_mb_size = 16; /* T3.2, T3.5, T3.6 */
+    static bool can_events;
+    void struct2queue(const CAN_message_t &msg);
+    void queue2struct(CAN_message_t &msg);
     uint32_t _baseAddress = FLEXCAN0_BASE;
     uint32_t NVIC_IRQ = 0UL;
     void softReset();
