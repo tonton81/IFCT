@@ -285,7 +285,7 @@ void IFCT::setMB(const IFCTMBNUM &mb_num, const IFCTMBTXRX &mb_rx_tx, const IFCT
     FLEXCANb_MBn_ID(_baseAddress, mb_num) = 0x00000000;
     FLEXCANb_MBn_WORD0(_baseAddress, mb_num) = 0x00000000;
     FLEXCANb_MBn_WORD1(_baseAddress, mb_num) = 0x00000000;
-    if ( ide != IDE ) FLEXCANb_MBn_CS(_baseAddress, mb_num) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY);
+    if ( ide != EXT ) FLEXCANb_MBn_CS(_baseAddress, mb_num) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY);
     else FLEXCANb_MBn_CS(_baseAddress, mb_num) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY) | FLEXCAN_MB_CS_SRR | FLEXCAN_MB_CS_IDE;
   }
   if ( mb_rx_tx == TX ) {
@@ -582,10 +582,29 @@ int IFCT::read(CAN_message_t &msg) {
 rescan_flexcan_rx_mailboxes:
   uint32_t status = FLEXCANb_IFLAG1(_baseAddress), timeout = millis();
 
-  if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, get only remaining RX (if any) */
+  if ( !mailbox_check && FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, get only remaining RX (if any) */
+    /* run once only when position resets back to 0 if FIFO is enabled */ 
     uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
     if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
     mailbox_check = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
+
+    /* if FIFO interrupt not enabled, we return at least 1 message while sequentially gathering mailboxes evenly */
+    if (!(FLEXCANb_IMASK1(_baseAddress) & FLEXCAN_IMASK1_BUF5M) && (FLEXCANb_IFLAG1(_baseAddress) & FLEXCAN_IFLAG1_BUF5I) ) {
+      msg.len = FLEXCAN_get_length(FLEXCANb_MBn_CS(_baseAddress, 0));
+      msg.flags.extended = (FLEXCANb_MBn_CS(_baseAddress, 0) & FLEXCAN_MB_CS_IDE) ? 1 : 0;
+      msg.flags.remote = (FLEXCANb_MBn_CS(_baseAddress, 0) & FLEXCAN_MB_CS_RTR) ? 1 : 0;
+      msg.timestamp = FLEXCAN_get_timestamp (FLEXCANb_MBn_CS(_baseAddress, 0));
+      msg.id = (FLEXCANb_MBn_ID(_baseAddress, 0) & FLEXCAN_MB_ID_EXT_MASK);
+      if (!msg.flags.extended) msg.id >>= FLEXCAN_MB_ID_STD_BIT_NO;
+      uint32_t dataIn = FLEXCANb_MBn_WORD0(_baseAddress, 0);
+      msg.buf[0] = dataIn >> 24; msg.buf[1] = dataIn >> 16; msg.buf[2] = dataIn >> 8; msg.buf[3] = dataIn;
+      dataIn = FLEXCANb_MBn_WORD1(_baseAddress, 0);
+      msg.buf[4] = dataIn >> 24; msg.buf[5] = dataIn >> 16; msg.buf[6] = dataIn >> 8; msg.buf[7] = dataIn;
+      FLEXCANb_IFLAG1(_baseAddress) = FLEXCAN_IFLAG1_BUF5I; /* clear FIFO bit only! */
+      if ( FLEXCANb_IFLAG1(_baseAddress) & FLEXCAN_IFLAG1_BUF6I ) FLEXCANb_IFLAG1(_baseAddress) = FLEXCAN_IFLAG1_BUF6I;
+      if ( FLEXCANb_IFLAG1(_baseAddress) & FLEXCAN_IFLAG1_BUF7I ) FLEXCANb_IFLAG1(_baseAddress) = FLEXCAN_IFLAG1_BUF7I;
+      return 1;
+    }
   }
   while (!(status & (1 << mailbox_check))) {
     if ( ++mailbox_check > 15 ) {
@@ -656,9 +675,9 @@ void can1_message_isr (void) {
 void IFCT::IFCT_message_ISR(void) {
   CAN_message_t msg; // setup a temporary storage buffer
   uint32_t status = FLEXCANb_IFLAG1(_baseAddress);
-  if ( status & FLEXCAN_IFLAG1_BUF5I && FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, capture frames if triggered */
+  if ( (FLEXCANb_IMASK1(_baseAddress) & FLEXCAN_IMASK1_BUF5M) && (status & FLEXCAN_IFLAG1_BUF5I) && (FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN) ) { /* FIFO is enabled, capture frames if triggered */
     while ( FLEXCANb_IFLAG1(_baseAddress) & FLEXCAN_IFLAG1_BUF5I ) {
-      if ( FLEXCANb_IMASK1(_baseAddress) & FLEXCAN_IFLAG1_BUF5I ) {
+      if ( FLEXCANb_IMASK1(_baseAddress) & FLEXCAN_IMASK1_BUF5M ) {
         msg.len = FLEXCAN_get_length(FLEXCANb_MBn_CS(_baseAddress, 0));
         msg.flags.extended = (FLEXCANb_MBn_CS(_baseAddress, 0) & FLEXCAN_MB_CS_IDE) ? 1 : 0;
         msg.flags.remote = (FLEXCANb_MBn_CS(_baseAddress, 0) & FLEXCAN_MB_CS_RTR) ? 1 : 0;
@@ -1066,7 +1085,7 @@ void IFCT::setMBFilterRange(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2) {
   }
   uint32_t mask = 0;
 
-  if ( id1 > id2 || (id2 > id1)&&(id2-id1>1000) || !id1 || !id2 ) return; /* don't play around... */
+  if ( id1 > id2 || ((id2 > id1) && (id2-id1>1000)) || !id1 || !id2 ) return; /* don't play around... */
 
   uint32_t stage1 = id1;
   for ( uint16_t i = id1+1; i <= id2; i++ ) stage1 |= i;
@@ -1086,4 +1105,84 @@ void IFCT::setMBFilterProcessing(IFCTMBNUM mb_num, uint32_t filter_id, uint32_t 
   FLEXCAN_ExitFreezeMode();
   if (!(FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE)) FLEXCANb_MBn_ID(_baseAddress, mb_num) = FLEXCAN_MB_ID_IDSTD(filter_id);
   else FLEXCANb_MBn_ID(_baseAddress, mb_num) = FLEXCAN_MB_ID_IDEXT(filter_id);
+}
+
+
+
+void IFCT::setFIFOFilter(const IFCTMBFLTEN &input) {
+  if ( !(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN )) return; /* FIFO not enabled. */
+  FLEXCAN_EnterFreezeMode();
+  for (uint8_t i = 0; i < 8; i++) { /* block all ID's so filtering could be applied. */
+    if ( input == REJECT_ALL ) {
+      FLEXCANb_IDFLT_TAB(_baseAddress, i) = 0xFFFFFFFF; /* reset id */
+      FLEXCANb_MB_MASK(_baseAddress, i) = 0x3FFFFFFF; // (RXIMR) /* block all id's */
+    }
+    else if ( input == ACCEPT_ALL ) {
+      FLEXCANb_IDFLT_TAB(_baseAddress, i) = 0; /* reset id */
+      FLEXCANb_MB_MASK(_baseAddress, i) = 0; // (RXIMR) /* allow all id's */
+    }
+  }
+  FLEXCAN_ExitFreezeMode();
+}
+
+
+
+void IFCT::setFIFOFilter(uint8_t filter, uint32_t id1, const IFCTMBIDE &ide, const IFCTMBIDE &remote) {
+  if ( !(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN )) return; /* FIFO not enabled. */
+  FLEXCAN_EnterFreezeMode();
+  uint32_t mask = 0;
+  if ( ((FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_IDAM_MASK) >> FLEXCAN_MCR_IDAM_BIT_NO) == 0 ) { /* If Table A is chosen for FIFO */
+    if ( ide != EXT ) mask = ((((id1) ^ (id1)) ^ 0xFFFFFFFF) << 19 );
+    else mask = ((((id1) ^ (id1)) ^ 0xFFFFFFFF) << 1 );
+    FLEXCANb_MB_MASK(_baseAddress, filter) = mask; // (RXIMR)
+    FLEXCANb_IDFLT_TAB(_baseAddress, filter) = ((ide == EXT ? 1 : 0) << 30) | ((remote == RTR ? 1 : 0) << 31) |
+        ((ide == EXT ? ((id1 & FLEXCAN_MB_ID_EXT_MASK) << 1) : (FLEXCAN_MB_ID_IDSTD(id1) << 1)));
+  }
+  FLEXCAN_ExitFreezeMode();
+}
+
+
+
+void IFCT::setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide, const IFCTMBIDE &remote) {
+  if ( !(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN )) return; /* FIFO not enabled. */
+  FLEXCAN_EnterFreezeMode();
+  uint32_t mask = 0;
+  if ( ((FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_IDAM_MASK) >> FLEXCAN_MCR_IDAM_BIT_NO) == 0 ) { /* If Table A is chosen for FIFO */
+    if ( ide != EXT ) mask = ((((id1 | id2) ^ (id1 & id2)) ^ 0xFFFFFFFF) << 19 );
+    else mask = ((((id1 | id2) ^ (id1 & id2)) ^ 0xFFFFFFFF) << 1 );
+    FLEXCANb_MB_MASK(_baseAddress, filter) = mask; // (RXIMR)
+    FLEXCANb_IDFLT_TAB(_baseAddress, filter) = ((ide == EXT ? 1 : 0) << 30) | ((remote == RTR ? 1 : 0) << 31) |
+        ((ide == EXT ? ((id1 & FLEXCAN_MB_ID_EXT_MASK) << 1) : (FLEXCAN_MB_ID_IDSTD(id1) << 1)));
+  }
+  FLEXCAN_ExitFreezeMode();
+}
+
+
+
+void IFCT::setFIFOFilterRange(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide, const IFCTMBIDE &remote) {
+  if ( !(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN )) return; /* FIFO not enabled. */
+  FLEXCAN_EnterFreezeMode();
+  uint32_t mask = 0;
+  if ( id1 > id2 || ((id2 > id1) && (id2 - id1 > 1000)) || !id1 || !id2 ) return; /* don't play around... */
+  uint32_t stage1 = id1;
+  for ( uint16_t i = id1 + 1; i <= id2; i++ ) stage1 |= i;
+  uint32_t stage2 = id1;
+  for ( uint16_t i = id1 + 1; i <= id2; i++ ) stage2 &= i;
+  uint32_t _calc = ((stage1 ^ stage2) ^ 0xFFFFFFFF);
+  if ( ((FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_IDAM_MASK) >> FLEXCAN_MCR_IDAM_BIT_NO) == 0 ) { /* If Table A is chosen for FIFO */
+    if ( ide != EXT ) mask = _calc << 19;
+    else mask = _calc << 1;
+    FLEXCANb_MB_MASK(_baseAddress, filter) = mask; // (RXIMR)
+    FLEXCANb_IDFLT_TAB(_baseAddress, filter) = ((ide == EXT ? 1 : 0) << 30) | ((remote == RTR ? 1 : 0) << 31) |
+        ((ide == EXT ? ((id1 & FLEXCAN_MB_ID_EXT_MASK) << 1) : (FLEXCAN_MB_ID_IDSTD(id1) << 1)));
+  }
+  FLEXCAN_ExitFreezeMode();
+}
+
+
+
+void IFCT::setFIFOFilterTable(IFCTFIFOTABLE letter) {
+  FLEXCAN_EnterFreezeMode();
+  FLEXCANb_MCR(_baseAddress) |= FLEXCAN_MCR_IDAM(letter);
+  FLEXCAN_ExitFreezeMode();
 }
