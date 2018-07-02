@@ -106,7 +106,9 @@ typedef enum IFCTMBTXRX {
 } IFCTMBTXRX;
 typedef enum IFCTMBIDE {
   NONE = 0,
-  IDE = 1,
+  EXT = 1,
+  RTR = 2,
+  STD = 3
 } IFCTMBIDE;
 typedef enum IFCTALTPIN {
   ALT = 0,
@@ -116,7 +118,11 @@ typedef enum IFCTMBFLTEN {
   ACCEPT_ALL = 0,
   REJECT_ALL = 1
 } IFCTMBFLTEN;
-
+typedef enum IFCTFIFOTABLE {
+  A = 0,
+  B = 1,
+  C = 2,
+} IFCTFIFOTABLE;
 
 typedef void (*_MB_ptr)(const CAN_message_t &msg); /* mailbox / global callbacks */
 
@@ -130,7 +136,7 @@ class IFCT {
     void enableFIFO(bool status = 1);
     void disableFIFO();
     void setBaudRate(uint32_t baud = 1000000);
-    void setMB(const IFCTMBNUM &mb_num, const IFCTMBTXRX &mb_rx_tx, const IFCTMBIDE &ide = NONE);
+    void setMB(const IFCTMBNUM &mb_num, const IFCTMBTXRX &mb_rx_tx, const IFCTMBIDE &ide = STD);
     void enableMBInterrupt(const IFCTMBNUM &mb_num, bool status = 1);
     void disableMBInterrupt(const IFCTMBNUM &mb_num);
     void onReceive(const IFCTMBNUM &mb_num, _MB_ptr handler); /* individual mailbox callback function */
@@ -173,6 +179,11 @@ class IFCT {
     void setMBFilterRange(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2); /* filter a range of ids */
     void events();
     static Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> flexcan_buffer; /* create an array buffer of struct size, 16 levels deep. */
+    void setFIFOFilter(const IFCTMBFLTEN &input);
+    void setFIFOFilter(uint8_t filter, uint32_t id1, const IFCTMBIDE &ide, const IFCTMBIDE &remote = NONE); /* single ID per filter */
+    void setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide, const IFCTMBIDE &remote = NONE); /* 2 ID's per filter */
+    void setFIFOFilterRange(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide, const IFCTMBIDE &remote = NONE); /* ID range per filter */
+    void setFIFOFilterTable(IFCTFIFOTABLE letter);
 
   private:
     static bool can_events;
