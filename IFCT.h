@@ -56,16 +56,16 @@
 #define FLEXCAN_BUFFER_SIZE 16
 
 typedef struct CAN_message_t {
-  uint32_t id;          // can identifier
-  uint16_t timestamp;   // FlexCAN time when message arrived
+  uint32_t id = 0;          // can identifier
+  uint16_t timestamp = 0;   // FlexCAN time when message arrived
   struct {
-    uint8_t extended: 1; // identifier is extended (29-bit)
-    uint8_t remote: 1;  // remote transmission request packet type
-    uint8_t overrun: 1; // message overrun
-    uint8_t reserved: 5;
+    bool extended = 0; // identifier is extended (29-bit)
+    bool remote = 0;  // remote transmission request packet type
+    bool overrun = 0; // message overrun
+    bool reserved = 0;
   } flags;
   uint8_t len = 0;      // length of data
-  uint8_t buf[8];       // data
+  uint8_t buf[8] = { 0 };       // data
   uint8_t mb = 0;       // used to identify mailbox reception
   uint8_t bus = 0;      // used to identify where the message came from when events() is used.
 } CAN_message_t;
@@ -187,7 +187,7 @@ class IFCT {
     void setFIFOFilter(uint8_t filter, uint32_t id1, const IFCTMBIDE &ide1, const IFCTMBIDE &remote1, uint32_t id2, const IFCTMBIDE &ide2, const IFCTMBIDE &remote2); /* TableB 2 ID / filter */
     void setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide1, const IFCTMBIDE &remote1, uint32_t id3, uint32_t id4, const IFCTMBIDE &ide2, const IFCTMBIDE &remote2); /* TableB 4 minimum ID / filter */
     void setFIFOFilterRange(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide1, const IFCTMBIDE &remote1, uint32_t id3, uint32_t id4, const IFCTMBIDE &ide2, const IFCTMBIDE &remote2); /* TableB dual range based IDs */
-
+    void setRFFN(uint8_t rffn); /* Number Of Rx FIFO Filters (0 == 8 filters, 1 == 16 filters, etc.. */
     void setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4 ); /* 4 partial IDs per filter */
 
   private:
