@@ -537,11 +537,12 @@ retry_tx_flexcan:
       else FLEXCANb_MBn_ID(_baseAddress, i) = FLEXCAN_MB_ID_IDSTD(msg.id);
       FLEXCANb_MBn_WORD0(_baseAddress, i) = (msg.buf[0] << 24) | (msg.buf[1] << 16) | (msg.buf[2] << 8) | msg.buf[3];
       FLEXCANb_MBn_WORD1(_baseAddress, i) = (msg.buf[4] << 24) | (msg.buf[5] << 16) | (msg.buf[6] << 8) | msg.buf[7];
-      FLEXCANb_MBn_CS(_baseAddress, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_ONCE) |
-                                          FLEXCAN_MB_CS_LENGTH(msg.len) |
-                                          ((msg.flags.remote) ? FLEXCAN_MB_CS_RTR : 0UL) |
-                                          ((msg.flags.extended) ? FLEXCAN_MB_CS_IDE : 0UL) |
-                                          ((msg.flags.extended) ? FLEXCAN_MB_CS_SRR : 0UL);
+
+      uint32_t options = 0;
+      if ( msg.flags.remote ) options |= FLEXCAN_MB_CS_RTR;
+      if ( msg.flags.extended ) options |= FLEXCAN_MB_CS_IDE | FLEXCAN_MB_CS_SRR;
+      FLEXCANb_MBn_CS(_baseAddress, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_ONCE) | FLEXCAN_MB_CS_LENGTH(msg.len) | options;
+
       return 1; /* transmit entry accepted */
     } // CODE CHECK
   } // FOR LOOP
@@ -566,11 +567,12 @@ int IFCT::write(IFCTMBNUM mb_num, const CAN_message_t &msg) {
   else FLEXCANb_MBn_ID(_baseAddress, mb_num) = FLEXCAN_MB_ID_IDSTD(msg.id);
   FLEXCANb_MBn_WORD0(_baseAddress, mb_num) = (msg.buf[0] << 24) | (msg.buf[1] << 16) | (msg.buf[2] << 8) | msg.buf[3];
   FLEXCANb_MBn_WORD1(_baseAddress, mb_num) = (msg.buf[4] << 24) | (msg.buf[5] << 16) | (msg.buf[6] << 8) | msg.buf[7];
-  FLEXCANb_MBn_CS(_baseAddress, mb_num) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_ONCE) |
-                                      FLEXCAN_MB_CS_LENGTH(msg.len) |
-                                      ((msg.flags.remote) ? FLEXCAN_MB_CS_RTR : 0UL) |
-                                      ((msg.flags.extended) ? FLEXCAN_MB_CS_IDE : 0UL) |
-                                      ((msg.flags.extended) ? FLEXCAN_MB_CS_SRR : 0UL);
+
+  uint32_t options = 0;
+  if ( msg.flags.remote ) options |= FLEXCAN_MB_CS_RTR;
+  if ( msg.flags.extended ) options |= FLEXCAN_MB_CS_IDE | FLEXCAN_MB_CS_SRR;
+  FLEXCANb_MBn_CS(_baseAddress, mb_num) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_ONCE) | FLEXCAN_MB_CS_LENGTH(msg.len) | options;
+
   return 1; // transmit entry accepted //
 }
 
