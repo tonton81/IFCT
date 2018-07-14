@@ -163,6 +163,8 @@ class IFCT {
     int write(const CAN_message_t &msg); /* use any available mailbox for transmitting */
     int write(IFCTMBNUM mb_num, const CAN_message_t &msg); /* use a single mailbox for transmitting */
     int read(CAN_message_t &msg);
+    int readMB(CAN_message_t &msg);
+    int readFIFO(CAN_message_t &msg);
     void IFCT_message_ISR(void);
     void setTX(IFCTALTPIN which = DEF);
     void setRX(IFCTALTPIN which = DEF);
@@ -192,6 +194,7 @@ class IFCT {
 
   private:
     static bool can_events;
+    uint8_t mailbox_reader_increment = 0;
     void struct2queue(const CAN_message_t &msg);
     void queue2struct(CAN_message_t &msg);
     uint32_t _baseAddress = FLEXCAN0_BASE;
