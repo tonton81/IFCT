@@ -71,16 +71,6 @@ typedef struct CAN_message_t {
 } CAN_message_t;
 
 
-typedef struct CAN_filter_t {
-    uint32_t id;
-    struct {
-        uint8_t extended:1;  // identifier is extended (29-bit)
-        uint8_t remote:1;    // remote transmission request packet type
-        uint8_t reserved:6;
-    } flags;
-} CAN_filter_t;
-
-
 typedef enum IFCTMBNUM {
   MB0 = 0,
   MB1 = 1,
