@@ -160,12 +160,11 @@ void IFCT::enableFIFO(bool status) {
   FLEXCANb_IFLAG1(_baseAddress) = FLEXCANb_IFLAG1(_baseAddress); // (all bits reset when written back)
   if ( status ) {
     FLEXCANb_MCR(_baseAddress) |= FLEXCAN_MCR_FEN;
-//QUICKFIND-KEYWORD
     /*
       Each group of eight filters occupies a memory space equivalent to two Message Buffers which
       means that the more filters are implemented the less Mailboxes will be available.
     */
-    FLEXCAN_set_rffn(FLEXCANb_CTRL2(_baseAddress), 0); // setup 8 Filters for FIFO, 0-5 = FIFO, 6-7 FILTER, 8-16 MBs, max value 0x3 which leaves MB14/15 free to use.
+    FLEXCAN_set_rffn(FLEXCANb_CTRL2(_baseAddress), 0); // setup 8 Filters for FIFO, 0-5 = FIFO, 6-7 FILTER, 8-15 MBs, max value 0x3 which leaves MB14/15 free to use.
     // Setup TX mailboxes from 8 -> 15, FIFO uses the first 8 (6MB for FIFO, 2MB for 8 filters for FIFO).
     uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
     if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
@@ -198,13 +197,11 @@ void IFCT::disableFIFO() {
 
 
 void IFCT::enableFIFOInterrupt(bool status) {
-  if ( !(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN) ) {
-    Serial.println("FIFO must be enabled first"); return;
-  }
-  if ( FLEXCANb_IMASK1(_baseAddress) & FLEXCAN_IFLAG1_BUF5I ) {
-    Serial.println("FIFO interrupts already enabled"); return;
-  }
-  ( !status ) ? FLEXCANb_IMASK1(_baseAddress) &= ~FLEXCAN_IFLAG1_BUF5I /* disable FIFO interrupt */ : FLEXCANb_IMASK1(_baseAddress) |= FLEXCAN_IFLAG1_BUF5I; /* enable FIFO interrupt */
+  if ( !(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN) ) return; /* FIFO must be enabled first */
+
+  if ( FLEXCANb_IMASK1(_baseAddress) & FLEXCAN_IFLAG1_BUF5I ) return; /* FIFO interrupts already enabled */
+
+  ( !status ) ? FLEXCANb_IMASK1(_baseAddress) &= ~FLEXCAN_IMASK1_BUF5M /* disable FIFO interrupt */ : FLEXCANb_IMASK1(_baseAddress) |= FLEXCAN_IMASK1_BUF5M; /* enable FIFO interrupt */
 }
 
 
@@ -275,9 +272,7 @@ void IFCT::setMB(const IFCTMBNUM &mb_num, const IFCTMBTXRX &mb_rx_tx, const IFCT
   if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) { /* FIFO enabled, block used mailboxes consumed by FIFO */
     uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB(16) - FIFO(6) */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
     if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
-    if ( mb_num < ( FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes ) ) {
-      Serial.println("Mailbox not available"); return;
-    }
+    if ( mb_num < ( FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes ) ) return; /* Mailbox not available, consumed by FIFO... */
   }
 
   FLEXCANb_IMASK1(_baseAddress) &= ~(1UL << mb_num); /* immediately disable mailbox interrupt */
@@ -291,12 +286,10 @@ void IFCT::setMB(const IFCTMBNUM &mb_num, const IFCTMBTXRX &mb_rx_tx, const IFCT
     else FLEXCANb_MBn_CS(_baseAddress, mb_num) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY) | FLEXCAN_MB_CS_SRR | FLEXCAN_MB_CS_IDE;
   }
 
-  if ( mb_rx_tx == TX ) {
-    FLEXCANb_MBn_CS(_baseAddress, mb_num) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_INACTIVE);
-  }
+  if ( mb_rx_tx == TX ) FLEXCANb_MBn_CS(_baseAddress, mb_num) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_INACTIVE);
 
-  FLEXCANb_TIMER(_baseAddress); // reading timer unlocks individual mailbox
-  FLEXCANb_IFLAG1(_baseAddress) = ( 1 << mb_num );
+  FLEXCANb_TIMER(_baseAddress); /* reading timer unlocks individual mailbox */
+  FLEXCANb_IFLAG1(_baseAddress) = ( 1 << mb_num ); /* clear mailbox reception flag */
 }
 
 
@@ -305,9 +298,7 @@ void IFCT::enableMBInterrupt(const IFCTMBNUM &mb_num, bool status) {
   if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) {
     uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB(16) - FIFO(6) */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
     if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
-    if ( mb_num < ( FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes ) ) {
-      Serial.println("Mailbox not available"); return;
-    }
+    if ( mb_num < ( FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes ) ) return; /* Mailbox not available */
   }
   if ( status ) FLEXCANb_IMASK1(_baseAddress) |= (1UL << mb_num); /* enable mailbox interrupt */
   else FLEXCANb_IMASK1(_baseAddress) &= ~(1UL << mb_num); /* disable mailbox interrupt */
@@ -329,11 +320,8 @@ void IFCT::setMaxMB(uint8_t last) {
   FLEXCAN_EnterFreezeMode();
   bool fifo_was_cleared = 0;
 
-  if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) {
-    disableFIFO(); /* let fifo clear current mailboxes */
-    fifo_was_cleared = 1;
-  }
-  else disableFIFO();
+  if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) fifo_was_cleared = 1; /* let fifo clear current mailboxes */
+  disableFIFO();
   
   FLEXCANb_IFLAG1(_baseAddress) = FLEXCANb_IFLAG1(_baseAddress); // (all bits reset when written back) (needed for MAXMB changes)
   FLEXCANb_MCR(_baseAddress) &= ~FLEXCAN_MCR_MAXMB_MASK; // disable mailboxes
