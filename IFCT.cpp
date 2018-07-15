@@ -296,7 +296,7 @@ void IFCT::setMB(const IFCTMBNUM &mb_num, const IFCTMBTXRX &mb_rx_tx, const IFCT
   }
 
   FLEXCANb_TIMER(_baseAddress); // reading timer unlocks individual mailbox
-  FLEXCANb_IMASK1(_baseAddress) = ( 1 << mb_num );
+  FLEXCANb_IFLAG1(_baseAddress) = ( 1 << mb_num );
 }
 
 
