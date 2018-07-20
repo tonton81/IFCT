@@ -34,6 +34,7 @@
 #include "Arduino.h"
 #include "circular_buffer.h"
 
+
 #define ext flags.extended
 #define rtr flags.remote
 #define FLEXCANb_MCR(b)  (*(vuint32_t*)(b))
@@ -88,6 +89,7 @@ typedef enum IFCTMBNUM {
   MB13 = 13,
   MB14 = 14,
   MB15 = 15,
+  FIFO = 16
 } IFCTMBNUM;
 typedef enum IFCTMBTXRX {
   TX,
@@ -169,6 +171,7 @@ class IFCT {
     void setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4); /* input 4 ID's to be filtered */
     void setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4, uint32_t id5); /* input 5 ID's to be filtered */
     void setMBFilterRange(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2); /* filter a range of ids */
+    void enhanceFilter(IFCTMBNUM mb_num);
     void events();
     static Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> flexcan_buffer; /* create an array buffer of struct size, 16 levels deep. */
     void setFIFOFilter(const IFCTMBFLTEN &input);
@@ -180,7 +183,7 @@ class IFCT {
     void setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide1, const IFCTMBIDE &remote1, uint32_t id3, uint32_t id4, const IFCTMBIDE &ide2, const IFCTMBIDE &remote2); /* TableB 4 minimum ID / filter */
     void setFIFOFilterRange(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide1, const IFCTMBIDE &remote1, uint32_t id3, uint32_t id4, const IFCTMBIDE &ide2, const IFCTMBIDE &remote2); /* TableB dual range based IDs */
     void setRFFN(uint8_t rffn); /* Number Of Rx FIFO Filters (0 == 8 filters, 1 == 16 filters, etc.. */
-    void setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4 ); /* 4 partial IDs per filter */
+    void setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4 ); /* TableC 4 partial IDs per filter */
 
   private:
     static bool can_events;
@@ -193,7 +196,9 @@ class IFCT {
     void FLEXCAN_EnterFreezeMode();
     void FLEXCAN_ExitFreezeMode();
     void setMBFilterProcessing(IFCTMBNUM mb_num, uint32_t filter_id, uint32_t calculated_mask);
-
+    bool filter_enhancement[16][2] = { { 0 } , { 0 } }; /* enhancement feature, first being enable bit, second being multiID or range based. */
+    uint32_t filter_enhancement_config[16][5] = { { 0 } , { 0 } }; /* storage for filter IDs */
+    bool fifo_filter_set[16] = { 0 };
 };
 extern IFCT Can0;
 extern IFCT Can1;
