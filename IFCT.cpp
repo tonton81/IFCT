@@ -598,6 +598,24 @@ rescan_rx_mbs:
         else FLEXCANb_MBn_CS(_baseAddress, mailbox_reader_increment) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY) | FLEXCAN_MB_CS_SRR | FLEXCAN_MB_CS_IDE;
         FLEXCANb_TIMER(_baseAddress); // reading timer unlocks individual mailbox
         FLEXCANb_IFLAG1(_baseAddress) = (1 << mailbox_reader_increment); /* immediately flush interrupt of current mailbox */
+        if ( filter_enhancement[mailbox_reader_increment][0] ) { /* filter enhancement (if enabled) */
+          if ( !filter_enhancement[mailbox_reader_increment][1] ) { /* multi-ID based filter enhancement */
+            bool enhance_filtering_success = 0;
+            for ( uint8_t i = 0; i < 5; i++ ) {
+            if ( msg.id == filter_enhancement_config[mailbox_reader_increment][i] ) {
+              enhance_filtering_success = 1;
+              break;
+              }
+            }
+            if ( enhance_filtering_success ) return 1;
+            goto rescan_rx_mbs;
+          }
+          else { /* range based ID filtering enhancement */
+            if ( (msg.id >= filter_enhancement_config[mailbox_reader_increment][0]) &&
+                 (msg.id <= filter_enhancement_config[mailbox_reader_increment][1]) ) return 1;
+            return 0;
+          }
+        }
         return 1; /* we got a frame, exit */
       }
     case FLEXCAN_MB_CODE_TX_INACTIVE: {       // TX inactive. Just chillin' waiting for a message to send.
@@ -632,6 +650,31 @@ int IFCT::readFIFO(CAN_message_t &msg) {
     FLEXCANb_IFLAG1(_baseAddress) = FLEXCAN_IFLAG1_BUF5I; /* clear FIFO bit only! */
     if ( FLEXCANb_IFLAG1(_baseAddress) & FLEXCAN_IFLAG1_BUF6I ) FLEXCANb_IFLAG1(_baseAddress) = FLEXCAN_IFLAG1_BUF6I;
     if ( FLEXCANb_IFLAG1(_baseAddress) & FLEXCAN_IFLAG1_BUF7I ) FLEXCANb_IFLAG1(_baseAddress) = FLEXCAN_IFLAG1_BUF7I;
+
+    bool enhance_filtering_success = 0;
+    uint8_t mailboxes = 0;
+    uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+    mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
+
+    for ( uint8_t i = 0; i < mailboxes; i++ ) {
+      if ( filter_enhancement[i][0] && fifo_filter_set[i] ) { /* if enhancement is active and set */
+        if ( !filter_enhancement[i][1] ) { /* if it's multi ID */
+          for ( uint8_t i = 0; i < 5; i++ ) {
+            if ( msg.id == filter_enhancement_config[i][i] ) {
+              enhance_filtering_success = 1;
+              break;
+            }
+          }
+        }
+        else { /* if it's range based */
+          if ( (msg.id >= filter_enhancement_config[i][0]) &&
+               (msg.id <= filter_enhancement_config[i][1]) ) enhance_filtering_success = 1;
+        }
+      }
+    }
+    if ( ( !enhance_filtering_success && filter_enhancement[0][0] ) ) return 0; /* did not pass enhancement filter */
+
     return 1;
   }
   return 0;
@@ -677,7 +720,43 @@ void IFCT::IFCT_message_ISR(void) {
         dataIn = FLEXCANb_MBn_WORD1(_baseAddress, 0);
         msg.buf[4] = dataIn >> 24; msg.buf[5] = dataIn >> 16; msg.buf[6] = dataIn >> 8; msg.buf[7] = dataIn;
         FLEXCANb_IFLAG1(_baseAddress) = FLEXCAN_IFLAG1_BUF5I; /* clear FIFO bit only! */
-        if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(msg);
+
+
+        bool enhance_filtering_success = 0;
+        uint8_t mailboxes = 0;
+        uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+        if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+        mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
+
+        for ( uint8_t i = 0; i < mailboxes; i++ ) {
+          if ( filter_enhancement[i][0] && fifo_filter_set[i] ) { /* if enhancement is active and set */
+            if ( !filter_enhancement[i][1] ) { /* if it's multi ID */
+              for ( uint8_t i = 0; i < 5; i++ ) {
+                if ( msg.id == filter_enhancement_config[i][i] ) {
+                  enhance_filtering_success = 1;
+                  break;
+                }
+              }
+            }
+            else { /* if it's range based */
+              if ( (msg.id >= filter_enhancement_config[i][0]) &&
+                   (msg.id <= filter_enhancement_config[i][1]) ) enhance_filtering_success = 1;
+            }
+          }
+        }
+
+
+        if ( ( enhance_filtering_success && filter_enhancement[0][0] ) || !filter_enhancement[0][0] ) { /* if enhanced AND success, OR not enhanced */
+          if ( !can_events ) {
+            if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(msg);
+            sendMSGtoIndividualMBCallback((IFCTMBNUM)0, msg); /* send frames direct to callback (unbuffered) */
+          }
+          else struct2queue(msg); /* store frame in queue ( buffered ) */
+        }
+
+
+
+
       }
       FLEXCANb_IFLAG1(_baseAddress) = FLEXCAN_IFLAG1_BUF5I; /* clear FIFO bit only! */
     }
@@ -702,7 +781,8 @@ void IFCT::IFCT_message_ISR(void) {
   /* non FIFO mailbox handling complete */
   /* mailbox handling routine */
   for (uint8_t i = mailboxes; i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++) {
-    if (!(status & (1 << i))) continue; // skip mailboxes that haven't triggered an interrupt
+    if (!(FLEXCANb_IMASK1(_baseAddress) & ( 1UL << i ))) continue; // skip mailboxes that don't have interrupts enabled
+    if (!(status & (1UL << i))) continue; // skip mailboxes that haven't triggered an interrupt
     uint32_t code = FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, i)); // Reading Control Status atomically locks mailbox.
     switch ( code ) {
       case FLEXCAN_MB_CODE_RX_FULL:           // rx full, Copy the frame to RX buffer
@@ -721,22 +801,41 @@ void IFCT::IFCT_message_ISR(void) {
           if ( _baseAddress == FLEXCAN0_BASE ) msg.bus = 0;
           else if ( _baseAddress == FLEXCAN1_BASE ) msg.bus = 1;
 
-          if ( !can_events ) {
-            if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(msg);
-            sendMSGtoIndividualMBCallback((IFCTMBNUM)i, msg); /* send frames direct to callback (unbuffered) */
+          bool enhance_filtering_success = 0;
+          if ( filter_enhancement[i][0] ) { /* filter enhancement (if enabled) */
+            if ( !filter_enhancement[i][1] ) { /* multi-ID based filter enhancement */
+              for ( uint8_t i = 0; i < 5; i++ ) {
+              if ( msg.id == filter_enhancement_config[msg.mb][i] ) {
+                enhance_filtering_success = 1;
+                break;
+                }
+              }
+            }
+            else { /* range based ID filtering enhancement */
+              if ( (msg.id >= filter_enhancement_config[i][0]) &&
+                   (msg.id <= filter_enhancement_config[i][1]) ) enhance_filtering_success = 1;
+            }
           }
-          else struct2queue(msg); /* store frame in queue ( buffered ) */
+
+          if ( ( enhance_filtering_success && filter_enhancement[i][0] ) || !filter_enhancement[i][0] ) { /* if enhanced AND success, OR not enhanced */
+            if ( !can_events ) {
+              if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(msg);
+              sendMSGtoIndividualMBCallback((IFCTMBNUM)i, msg); /* send frames direct to callback (unbuffered) */
+            }
+            else struct2queue(msg); /* store frame in queue ( buffered ) */
+          }
+
 
           if (!msg.flags.extended) FLEXCANb_MBn_CS(_baseAddress, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY);
           else FLEXCANb_MBn_CS(_baseAddress, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY) | FLEXCAN_MB_CS_SRR | FLEXCAN_MB_CS_IDE;
           FLEXCANb_TIMER(_baseAddress); // reading timer unlocks individual mailbox
           FLEXCANb_IFLAG1(_baseAddress) = (1UL << i); /* immediately flush interrupt of current mailbox */
-          status &= ~(1 << i); /* remove bit from initial flag lookup so it's not set at end when another frame is captured */
+          status &= ~(1UL << i); /* remove bit from initial flag lookup so it's not set at end when another frame is captured */
           break;
         }
       case FLEXCAN_MB_CODE_TX_INACTIVE: {       // TX inactive. Just chillin' waiting for a message to send.
           FLEXCANb_IFLAG1(_baseAddress) = (1UL << i); /* immediately flush interrupt of current mailbox */
-          status &= ~(1 << i); /* remove bit from initial flag lookup so it's not set at end when another frame is captured */
+          status &= ~(1UL << i); /* remove bit from initial flag lookup so it's not set at end when another frame is captured */
           continue; /* skip mailboxes that are TX */
         }
       case FLEXCAN_MB_CODE_RX_BUSY:           // mailbox is busy, check it later.
@@ -965,6 +1064,10 @@ void IFCT::setMBFilter(IFCTMBFLTEN input) {
     mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
   }
   FLEXCAN_EnterFreezeMode();
+  for (uint8_t i = 0; i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++ ) {
+    filter_enhancement[i][0] = 0;
+    filter_enhancement[i][1] = 0;
+  }
   for (uint8_t i = mailboxes; i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++) {
     if ( input == ACCEPT_ALL ) FLEXCANb_MB_MASK(_baseAddress, i) = 0x00000000; // (RXIMR)
     if ( input == REJECT_ALL ) FLEXCANb_MB_MASK(_baseAddress, i) = 0x3FFFFFFF; // (RXIMR)
@@ -983,7 +1086,8 @@ void IFCT::setMBFilter(IFCTMBNUM mb_num, IFCTMBFLTEN input) {
     mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
     if ( mb_num < mailboxes ) return; /* mailbox not available */
   }
-
+  filter_enhancement[mb_num][0] = 0;
+  filter_enhancement[mb_num][1] = 0;
   FLEXCAN_EnterFreezeMode();
   if ( input == ACCEPT_ALL ) FLEXCANb_MB_MASK(_baseAddress, mb_num) = 0x00000000; // (RXIMR)
   if ( input == REJECT_ALL ) FLEXCANb_MB_MASK(_baseAddress, mb_num) = 0x3FFFFFFF; // (RXIMR)
@@ -1002,6 +1106,8 @@ void IFCT::setMBFilter(IFCTMBNUM mb_num, uint32_t id1) {
     if ( mb_num < mailboxes ) return; /* mailbox not available to be set */
   }
   uint32_t mask = 0;
+  filter_enhancement[mb_num][0] = 0;
+  filter_enhancement[mb_num][0] = 0;
   if (!(FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE)) mask = ((((id1) ^ (id1)) ^ 0xFFFFFFFF) << 18 );
   else mask = ((((id1) ^ (id1)) ^ 0xFFFFFFFF) << 0 );
   setMBFilterProcessing(mb_num,id1,mask);
@@ -1016,6 +1122,13 @@ void IFCT::setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2) {
     if ( mb_num < mailboxes ) return; /* mailbox not available to be set */
   }
   uint32_t mask = 0;
+  filter_enhancement[mb_num][0] = 0;
+  filter_enhancement[mb_num][1] = 0;
+  filter_enhancement_config[mb_num][0] = id1;
+  filter_enhancement_config[mb_num][1] = id2;
+  filter_enhancement_config[mb_num][2] = id2;
+  filter_enhancement_config[mb_num][3] = id2;
+  filter_enhancement_config[mb_num][4] = id2;
   if (!(FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE)) mask = ((((id1 | id2) ^ (id1 & id2)) ^ 0xFFFFFFFF) << 18 );
   else mask = ((((id1 | id2) ^ (id1 & id2)) ^ 0xFFFFFFFF) << 0 );
   setMBFilterProcessing(mb_num,id1,mask);
@@ -1030,9 +1143,32 @@ void IFCT::setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id
     if ( mb_num < mailboxes ) return; /* mailbox not available to be set */
   }
   uint32_t mask = 0;
+  filter_enhancement[mb_num][0] = 0;
+  filter_enhancement[mb_num][1] = 0;
+  filter_enhancement_config[mb_num][0] = id1;
+  filter_enhancement_config[mb_num][1] = id2;
+  filter_enhancement_config[mb_num][2] = id3;
+  filter_enhancement_config[mb_num][3] = id3;
+  filter_enhancement_config[mb_num][4] = id3;
   if (!(FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE)) mask = ((((id1 | id2 | id3) ^ (id1 & id2 & id3)) ^ 0xFFFFFFFF) << 18 );
   else mask = ((((id1 | id2 | id3) ^ (id1 & id2 & id3)) ^ 0xFFFFFFFF) << 0 );
   setMBFilterProcessing(mb_num,id1,mask);
+}
+
+
+void IFCT::enhanceFilter(IFCTMBNUM mb_num) {
+  if ( (FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN) ) { /* FIFO is enabled check routine */
+    uint8_t mailboxes = 0;
+    uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+    if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+    mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
+    if ( mb_num < mailboxes ) return; /* use "FIFO" instead of "MB(x)" for FIFO region */
+    if ( mb_num == FIFO ) {
+      for ( uint8_t i = 0; i < mailboxes; i++ ) filter_enhancement[i][0] = 1; /* enhance FIFO filters based on consumed mailboxes (RFFN) */
+      return; /* finished FIFO filter enhancements */
+    }
+  }
+  filter_enhancement[mb_num][0] = 1;
 }
 
 void IFCT::setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4) {
@@ -1044,6 +1180,13 @@ void IFCT::setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id
     if ( mb_num < mailboxes ) return; /* mailbox not available to be set */
   }
   uint32_t mask = 0;
+  filter_enhancement[mb_num][0] = 0;
+  filter_enhancement[mb_num][1] = 0;
+  filter_enhancement_config[mb_num][0] = id1;
+  filter_enhancement_config[mb_num][1] = id2;
+  filter_enhancement_config[mb_num][2] = id3;
+  filter_enhancement_config[mb_num][3] = id4;
+  filter_enhancement_config[mb_num][4] = id4;
   if (!(FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE)) mask = ((((id1 | id2 | id3 | id4) ^ (id1 & id2 & id3 & id4)) ^ 0xFFFFFFFF) << 18 );
   else mask = ((((id1 | id2 | id3 | id4) ^ (id1 & id2 & id3 & id4)) ^ 0xFFFFFFFF) << 0 );
   setMBFilterProcessing(mb_num,id1,mask);
@@ -1058,6 +1201,13 @@ void IFCT::setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id
     if ( mb_num < mailboxes ) return; /* mailbox not available to be set */
   }
   uint32_t mask = 0;
+  filter_enhancement[mb_num][0] = 0;
+  filter_enhancement[mb_num][1] = 0;
+  filter_enhancement_config[mb_num][0] = id1;
+  filter_enhancement_config[mb_num][1] = id2;
+  filter_enhancement_config[mb_num][2] = id3;
+  filter_enhancement_config[mb_num][3] = id4;
+  filter_enhancement_config[mb_num][4] = id5;
   if (!(FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE)) mask = ((((id1 | id2 | id3 | id4 | id5) ^ (id1 & id2 & id3 & id4 & id5)) ^ 0xFFFFFFFF) << 18 );
   else mask = ((((id1 | id2 | id3 | id4 | id5) ^ (id1 & id2 & id3 & id4 & id5)) ^ 0xFFFFFFFF) << 0 );
   setMBFilterProcessing(mb_num,id1,mask);
@@ -1071,6 +1221,14 @@ void IFCT::setMBFilterRange(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2) {
     mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
     if ( mb_num < mailboxes ) return; /* mailbox not available to be set */
   }
+
+  filter_enhancement[mb_num][0] = 0;
+  filter_enhancement[mb_num][1] = 1;
+  filter_enhancement_config[mb_num][0] = id1;
+  filter_enhancement_config[mb_num][1] = id2;
+  filter_enhancement_config[mb_num][2] = id2;
+  filter_enhancement_config[mb_num][3] = id2;
+  filter_enhancement_config[mb_num][4] = id2;
 
   if ( id1 > id2 || ((id2 > id1) && (id2-id1>1000)) || !id1 || !id2 ) return; /* don't play around... */
 
@@ -1096,8 +1254,16 @@ void IFCT::setMBFilterProcessing(IFCTMBNUM mb_num, uint32_t filter_id, uint32_t 
 
 void IFCT::setFIFOFilter(const IFCTMBFLTEN &input) {
   if ( !(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN )) return; /* FIFO not enabled. */
+
+  bool enhance_filtering_success = 0;
+  uint8_t mailboxes = 0;
+  uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+  if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+  mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
+
   FLEXCAN_EnterFreezeMode();
-  for (uint8_t i = 0; i < 8; i++) { /* block all ID's so filtering could be applied. */
+  for (uint8_t i = 0; i < mailboxes; i++) { /* block all ID's so filtering could be applied. */
+    fifo_filter_set[i] = 0; /* reset enhancement filters bit set */
     if ( input == REJECT_ALL ) { /* Tables A & B */
       FLEXCANb_IDFLT_TAB(_baseAddress, i) = 0xFFFFFFFF; /* reset id */
       FLEXCANb_MB_MASK(_baseAddress, i) = 0x3FFFFFFF; // (RXIMR) /* block all id's */
@@ -1135,6 +1301,21 @@ void IFCT::setFIFOFilter(uint8_t filter, uint32_t id1, const IFCTMBIDE &ide, con
 void IFCT::setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide, const IFCTMBIDE &remote) {
   if ( !(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN )) return; /* FIFO not enabled. */
   if ( ((FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_IDAM_MASK) >> FLEXCAN_MCR_IDAM_BIT_NO) != 0 ) return; /* must be TableA to process */
+
+  uint8_t mailboxes = 0;
+  uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+  if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+  mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
+  if ( filter >= mailboxes ) return; /* not in FIFO region */
+  fifo_filter_set[filter] = 1; /* show that it's set */
+  for ( uint8_t i = 0; i < mailboxes; i++ ) filter_enhancement[i][0] = 0; /* disable FIFO enhancement */
+  filter_enhancement[filter][1] = 0; /* set it as multiid based */
+  filter_enhancement_config[filter][0] = id1;
+  filter_enhancement_config[filter][1] = id2;
+  filter_enhancement_config[filter][2] = id2;
+  filter_enhancement_config[filter][3] = id2;
+  filter_enhancement_config[filter][4] = id2;
+
   FLEXCAN_EnterFreezeMode();
   uint32_t mask = 0;
   ( ide != EXT ) ? (mask = ((((id1 | id2) ^ (id1 & id2)) ^ 0xFFFFFFFF) << 19 )) : (mask = ((((id1 | id2) ^ (id1 & id2)) ^ 0xFFFFFFFF) << 1 ));
@@ -1150,7 +1331,23 @@ void IFCT::setFIFOFilterRange(uint8_t filter, uint32_t id1, uint32_t id2, const 
   if ( !(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN )) return; /* FIFO not enabled. */
   if ( ((FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_IDAM_MASK) >> FLEXCAN_MCR_IDAM_BIT_NO) != 0 ) return; /* must be TableA to process */
   if ( id1 > id2 || ((id2 > id1) && (id2 - id1 > 1000)) || !id1 || !id2 ) return; /* don't play around... */
+
+  uint8_t mailboxes = 0;
+  uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
+  if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
+  mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
+  if ( filter >= mailboxes ) return; /* not in FIFO region */
+  fifo_filter_set[filter] = 1; /* show that it's set */
+  for ( uint8_t i = 0; i < mailboxes; i++ ) filter_enhancement[i][0] = 0; /* disable FIFO enhancement */
+  filter_enhancement[filter][1] = 1; /* set it as range based */
+  filter_enhancement_config[filter][0] = id1;
+  filter_enhancement_config[filter][1] = id2;
+  filter_enhancement_config[filter][2] = id2;
+  filter_enhancement_config[filter][3] = id2;
+  filter_enhancement_config[filter][4] = id2;
+
   FLEXCAN_EnterFreezeMode();
+
   uint32_t mask = 0, stage1 = id1, stage2 = id1;
   for ( uint16_t i = id1 + 1; i <= id2; i++ ) {
     stage1 |= i; stage2 &= i;
