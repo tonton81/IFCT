@@ -995,23 +995,23 @@ void IFCT::mailboxStatus() {
 void IFCT::setTX(IFCTALTPIN which) {
 
 #if defined(__MK20DX256__)
-  CORE_PIN3_CONFIG = PORT_PCR_MUX(2) | PORT_PCR_PE;
+  CORE_PIN3_CONFIG = PORT_PCR_MUX(2);
 #endif
 
 #if defined(__MK64FX512__) || defined(__MK66FX1M0__)
   if ( _baseAddress == FLEXCAN0_BASE ) {
     if ( which == ALT ) {
-      CORE_PIN3_CONFIG = 0; CORE_PIN29_CONFIG = PORT_PCR_MUX(2) | PORT_PCR_PE;
+      CORE_PIN3_CONFIG = 0; CORE_PIN29_CONFIG = PORT_PCR_MUX(2);
     }
     else if ( which == DEF ) {
-      CORE_PIN29_CONFIG = 0; CORE_PIN3_CONFIG = PORT_PCR_MUX(2) | PORT_PCR_PE;
+      CORE_PIN29_CONFIG = 0; CORE_PIN3_CONFIG = PORT_PCR_MUX(2);
     }
   } /* Alternative CAN1 pins are not broken out on Teensy 3.6 */
 #endif
 
 #if defined(__MK66FX1M0__)
   if ( _baseAddress == FLEXCAN1_BASE ) {
-      CORE_PIN33_CONFIG = PORT_PCR_MUX(2) | PORT_PCR_PE;
+      CORE_PIN33_CONFIG = PORT_PCR_MUX(2);
   }
 #endif
 
@@ -1023,23 +1023,23 @@ void IFCT::setTX(IFCTALTPIN which) {
 void IFCT::setRX(IFCTALTPIN which) {
 
 #if defined(__MK20DX256__)
-  CORE_PIN4_CONFIG = PORT_PCR_MUX(2) | PORT_PCR_PE;
+  CORE_PIN4_CONFIG = PORT_PCR_MUX(2);
 #endif
 
 #if defined(__MK64FX512__) || defined(__MK66FX1M0__)
   if ( _baseAddress == FLEXCAN0_BASE ) {
     if ( which == ALT ) {
-      CORE_PIN4_CONFIG = 0; CORE_PIN30_CONFIG = PORT_PCR_MUX(2) | PORT_PCR_PE;
+      CORE_PIN4_CONFIG = 0; CORE_PIN30_CONFIG = PORT_PCR_MUX(2);
     }
     else if ( which == DEF ) {
-      CORE_PIN30_CONFIG = 0; CORE_PIN4_CONFIG = PORT_PCR_MUX(2) | PORT_PCR_PE;
+      CORE_PIN30_CONFIG = 0; CORE_PIN4_CONFIG = PORT_PCR_MUX(2);
     }
   } /* Alternative CAN1 pins are not broken out on Teensy 3.6 */
 #endif
 
 #if defined(__MK66FX1M0__)
   if ( _baseAddress == FLEXCAN1_BASE ) {
-      CORE_PIN34_CONFIG = PORT_PCR_MUX(2) | PORT_PCR_PE;
+      CORE_PIN34_CONFIG = PORT_PCR_MUX(2);
   }
 #endif
 
