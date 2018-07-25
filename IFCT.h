@@ -196,7 +196,6 @@ class IFCT {
     uint32_t _baseAddress = FLEXCAN0_BASE;
     uint32_t NVIC_IRQ = 0UL;
     uint32_t currentBitrate = 0UL;
-    bool _events_autoBaud = 0;
     void softReset();
     void FLEXCAN_EnterFreezeMode();
     void FLEXCAN_ExitFreezeMode();
