@@ -128,6 +128,9 @@ class IFCT {
     void enableFIFO(bool status = 1);
     void disableFIFO();
     void setBaudRate(uint32_t baud = 1000000);
+    uint32_t getBaudRate() { return currentBitrate; }
+    void autoBaud();
+    bool connected();
     void setMB(const IFCTMBNUM &mb_num, const IFCTMBTXRX &mb_rx_tx, const IFCTMBIDE &ide = STD);
     void enableMBInterrupt(const IFCTMBNUM &mb_num, bool status = 1);
     void disableMBInterrupt(const IFCTMBNUM &mb_num);
@@ -192,6 +195,8 @@ class IFCT {
     void queue2struct(CAN_message_t &msg);
     uint32_t _baseAddress = FLEXCAN0_BASE;
     uint32_t NVIC_IRQ = 0UL;
+    uint32_t currentBitrate = 0UL;
+    bool _events_autoBaud = 0;
     void softReset();
     void FLEXCAN_EnterFreezeMode();
     void FLEXCAN_ExitFreezeMode();
