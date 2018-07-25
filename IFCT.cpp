@@ -1483,7 +1483,6 @@ void IFCT::autoBaud() {
   }
 
   if ( !FLEXCAN_ESR_get_fault_code(esr1) && (esr1 & (1UL << 18)) ) { /* captured valid bitrate */
-    Serial.print("Found!: "); Serial.println(speeds[count]);
     FLEXCAN_EnterFreezeMode();
     FLEXCANb_CTRL1(_baseAddress) &= ~FLEXCAN_CTRL_LOM; /* listen only mode disable */
     FLEXCAN_ExitFreezeMode();
