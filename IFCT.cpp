@@ -59,7 +59,6 @@ IFCT Can1 = IFCT(1000000,FLEXCAN1_BASE);
 #endif
 
 IFCT::IFCT(uint32_t baud, uint32_t base) {
-
   Serial.begin(115200); // usb serial
   NVIC_SET_PRIORITY(IRQ_USBOTG, 0);
 
@@ -96,7 +95,7 @@ IFCT::IFCT(uint32_t baud, uint32_t base) {
 
   disableFIFO();
   disableFIFOInterrupt();
-  setBaudRate(baud);
+
   FLEXCANb_MCR(_baseAddress) |= FLEXCAN_MCR_IRMQ; // individual mailbox masking
   FLEXCANb_CTRL2(_baseAddress) |= FLEXCAN_CTRL2_RRS | // store remote frames
                     FLEXCAN_CTRL2_MRP; // mailbox > FIFO priority.
@@ -109,6 +108,7 @@ IFCT::IFCT(uint32_t baud, uint32_t base) {
 
   NVIC_SET_PRIORITY(NVIC_IRQ, 1); /* set interrupt priority */
   NVIC_ENABLE_IRQ(NVIC_IRQ); /* enable message interrupt */
+  autoBaud();
 
 }
  
@@ -211,6 +211,7 @@ void IFCT::disableFIFOInterrupt() {
 
 
 void IFCT::setBaudRate(uint32_t baud) {
+  currentBitrate = baud;
   uint32_t divisor = 0, bestDivisor = 0, result = 16000000 / baud / (divisor + 1);
   int error = baud - (16000000 / (result * (divisor + 1))), bestError = error;
   bool frz_flag_negate = 0;
@@ -264,6 +265,7 @@ void IFCT::setBaudRate(uint32_t baud) {
   }, propSeg = bitTimingTable[result][0], pSeg1 = bitTimingTable[result][1], pSeg2 = bitTimingTable[result][2];
   FLEXCANb_CTRL1(_baseAddress) = (FLEXCAN_CTRL_PROPSEG(propSeg) | FLEXCAN_CTRL_RJW(1) | FLEXCAN_CTRL_PSEG1(pSeg1) |
                     FLEXCAN_CTRL_PSEG2(pSeg2) | FLEXCAN_CTRL_PRESDIV(divisor));
+  FLEXCANb_CTRL1(_baseAddress) &= ~FLEXCAN_CTRL_LOM; /* disable listen-only mode */
   if ( frz_flag_negate ) FLEXCAN_ExitFreezeMode();
 }
 
@@ -851,6 +853,7 @@ void IFCT::IFCT_message_ISR(void) {
     }
   }
   FLEXCANb_IFLAG1(_baseAddress) = status; /* essentially, if all bits were cleared above, it's basically writing 0 to IFLAG, to prevent new data interruptions. */
+  FLEXCANb_ESR1(_baseAddress) |= FLEXCAN_ESR_ERR_INT; /* we clear the ERROR bit if we received a functional callback */
 }
 
 
@@ -865,18 +868,6 @@ void IFCT::queue2struct(CAN_message_t &msg) {
   flexcan_buffer.pop_front(buf, sizeof(CAN_message_t));
   memmove(&msg, buf, sizeof(msg));
 }
-
-void IFCT::events() {
-  CAN_message_t frame;
-  if ( !can_events ) can_events = 1; /* handle callbacks from loop */
-
-  if ( flexcan_buffer.size() ) { /* if a queue frame is available */
-    queue2struct(frame);
-    if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(frame);
-    sendMSGtoIndividualMBCallback((IFCTMBNUM)frame.mb, frame); 
-  }
-}
-
 
 
 
@@ -1004,23 +995,23 @@ void IFCT::mailboxStatus() {
 void IFCT::setTX(IFCTALTPIN which) {
 
 #if defined(__MK20DX256__)
-  CORE_PIN3_CONFIG = PORT_PCR_MUX(2);
+  CORE_PIN3_CONFIG = PORT_PCR_MUX(2) | PORT_PCR_PE;
 #endif
 
 #if defined(__MK64FX512__) || defined(__MK66FX1M0__)
   if ( _baseAddress == FLEXCAN0_BASE ) {
     if ( which == ALT ) {
-      CORE_PIN3_CONFIG = 0; CORE_PIN29_CONFIG = PORT_PCR_MUX(2);
+      CORE_PIN3_CONFIG = 0; CORE_PIN29_CONFIG = PORT_PCR_MUX(2) | PORT_PCR_PE;
     }
     else if ( which == DEF ) {
-      CORE_PIN29_CONFIG = 0; CORE_PIN3_CONFIG = PORT_PCR_MUX(2);
+      CORE_PIN29_CONFIG = 0; CORE_PIN3_CONFIG = PORT_PCR_MUX(2) | PORT_PCR_PE;
     }
   } /* Alternative CAN1 pins are not broken out on Teensy 3.6 */
 #endif
 
 #if defined(__MK66FX1M0__)
   if ( _baseAddress == FLEXCAN1_BASE ) {
-      CORE_PIN33_CONFIG = PORT_PCR_MUX(2);
+      CORE_PIN33_CONFIG = PORT_PCR_MUX(2) | PORT_PCR_PE;
   }
 #endif
 
@@ -1032,23 +1023,23 @@ void IFCT::setTX(IFCTALTPIN which) {
 void IFCT::setRX(IFCTALTPIN which) {
 
 #if defined(__MK20DX256__)
-  CORE_PIN4_CONFIG = PORT_PCR_MUX(2);
+  CORE_PIN4_CONFIG = PORT_PCR_MUX(2) | PORT_PCR_PE;
 #endif
 
 #if defined(__MK64FX512__) || defined(__MK66FX1M0__)
   if ( _baseAddress == FLEXCAN0_BASE ) {
     if ( which == ALT ) {
-      CORE_PIN4_CONFIG = 0; CORE_PIN30_CONFIG = PORT_PCR_MUX(2);
+      CORE_PIN4_CONFIG = 0; CORE_PIN30_CONFIG = PORT_PCR_MUX(2) | PORT_PCR_PE;
     }
     else if ( which == DEF ) {
-      CORE_PIN30_CONFIG = 0; CORE_PIN4_CONFIG = PORT_PCR_MUX(2);
+      CORE_PIN30_CONFIG = 0; CORE_PIN4_CONFIG = PORT_PCR_MUX(2) | PORT_PCR_PE;
     }
   } /* Alternative CAN1 pins are not broken out on Teensy 3.6 */
 #endif
 
 #if defined(__MK66FX1M0__)
   if ( _baseAddress == FLEXCAN1_BASE ) {
-      CORE_PIN34_CONFIG = PORT_PCR_MUX(2);
+      CORE_PIN34_CONFIG = PORT_PCR_MUX(2) | PORT_PCR_PE;
   }
 #endif
 
@@ -1255,7 +1246,6 @@ void IFCT::setMBFilterProcessing(IFCTMBNUM mb_num, uint32_t filter_id, uint32_t 
 void IFCT::setFIFOFilter(const IFCTMBFLTEN &input) {
   if ( !(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN )) return; /* FIFO not enabled. */
 
-  bool enhance_filtering_success = 0;
   uint8_t mailboxes = 0;
   uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
   if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
@@ -1463,4 +1453,64 @@ void IFCT::setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, uint32_t id
     (( id4 > 0x7FF ) ? ((id4 >> (29 - 8)) << 0) : ((id4 >> (11 - 8)) << 0));
   FLEXCANb_MB_MASK(_baseAddress, filter) = 0xFFFFFFFF; // (RXIMR)
   FLEXCAN_ExitFreezeMode();
+}
+
+
+void IFCT::autoBaud() {
+  FLEXCAN_EnterFreezeMode();
+  FLEXCANb_CTRL1(_baseAddress) |= FLEXCAN_CTRL_LOM; /* listen only mode enable */
+  uint32_t mcr = FLEXCANb_MCR(_baseAddress); /* we store the MCR, as softReset wipes it out! */
+  uint32_t imask1 = FLEXCANb_IMASK1(_baseAddress); /* we store MB/FIFO interrupt register */
+  FLEXCANb_IMASK1(_baseAddress) = 0; /* we clear MB/FIFO interrupt register */
+  FLEXCAN_ExitFreezeMode();
+
+  const uint32_t speeds[] = { 10000, 20000, 33333, 50000, 83333, 125000, 250000, 500000, 800000, 1000000 };
+  uint8_t count = sizeof(speeds) / sizeof(speeds[0]);
+
+  uint32_t esr1 = 0;
+
+  while ( count-- ) {
+    FLEXCAN_EnterFreezeMode();
+    softReset();
+    FLEXCANb_MCR(_baseAddress) = mcr;
+    FLEXCAN_ExitFreezeMode();
+    FLEXCANb_IFLAG1(_baseAddress) = FLEXCANb_IFLAG1(_baseAddress); /* clear interrupt flagged bits */
+    setBaudRate(speeds[count]);
+    uint32_t timeout = millis();
+    while ( millis() - timeout < 25 ) esr1 = FLEXCANb_ESR1(_baseAddress);
+    if ( !esr1 ) continue; /* skip bitrates that don't have synch bit set */
+    if ( !FLEXCAN_ESR_get_fault_code(esr1) && (esr1 & (1UL << 18)) ) break;
+  }
+
+  if ( !FLEXCAN_ESR_get_fault_code(esr1) && (esr1 & (1UL << 18)) ) { /* captured valid bitrate */
+    Serial.print("Found!: "); Serial.println(speeds[count]);
+    FLEXCAN_EnterFreezeMode();
+    FLEXCANb_CTRL1(_baseAddress) &= ~FLEXCAN_CTRL_LOM; /* listen only mode disable */
+    FLEXCAN_ExitFreezeMode();
+  }
+
+  FLEXCANb_IMASK1(_baseAddress) = imask1; /* finally, we restore MB/FIFO interrupt register */
+}
+
+
+
+bool IFCT::connected() {
+  uint32_t esr1 = FLEXCANb_ESR1(_baseAddress);
+  if ( (esr1 & (1UL << 18)) && !FLEXCAN_ESR_get_fault_code(esr1) ) return 1;
+  return 0;
+}
+
+
+
+void IFCT::events() {
+
+  if ( !can_events ) can_events = 1; /* handle callbacks from loop */
+
+  if ( flexcan_buffer.size() ) { /* if a queue frame is available */
+    CAN_message_t frame;
+    queue2struct(frame);
+    if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(frame);
+    sendMSGtoIndividualMBCallback((IFCTMBNUM)frame.mb, frame); 
+  }
+
 }
