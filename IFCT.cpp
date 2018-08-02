@@ -85,7 +85,8 @@ IFCT::IFCT(uint32_t baud, uint32_t base) {
   else if( base == FLEXCAN1_BASE ) SIM_SCGC3 |= SIM_SCGC3_FLEXCAN1;
 #endif
   FLEXCANb_CTRL1(_baseAddress) &= ~FLEXCAN_CTRL_CLK_SRC;
-  FLEXCANb_MCR(_baseAddress) |= FLEXCAN_MCR_FRZ; /* enable module */
+  FLEXCANb_CTRL1(_baseAddress) |= FLEXCAN_CTRL_LOM; /* listen only mode enable */
+  FLEXCANb_MCR(_baseAddress) |= FLEXCAN_MCR_FRZ; /* enable freeze bit */
   FLEXCANb_MCR(_baseAddress) &= ~FLEXCAN_MCR_MDIS; /* enable module */
 
   while (FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_LPM_ACK);
@@ -99,6 +100,7 @@ IFCT::IFCT(uint32_t baud, uint32_t base) {
   FLEXCANb_MCR(_baseAddress) |= FLEXCAN_MCR_IRMQ; // individual mailbox masking
   FLEXCANb_CTRL2(_baseAddress) |= FLEXCAN_CTRL2_RRS | // store remote frames
                     FLEXCAN_CTRL2_MRP; // mailbox > FIFO priority.
+
   FLEXCANb_MCR(_baseAddress) &= ~FLEXCAN_MCR_HALT; /* start the CAN */
 
   while (FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FRZ_ACK);
@@ -108,7 +110,6 @@ IFCT::IFCT(uint32_t baud, uint32_t base) {
 
   NVIC_SET_PRIORITY(NVIC_IRQ, 1); /* set interrupt priority */
   NVIC_ENABLE_IRQ(NVIC_IRQ); /* enable message interrupt */
-  autoBaud();
 
 }
  
@@ -124,6 +125,35 @@ void IFCT::softReset() {
   FLEXCANb_MCR(_baseAddress) ^= FLEXCAN_MCR_SOFT_RST;
   while (FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_SOFT_RST);
 }
+
+void IFCT::softResetRestore() {
+  /*
+    Soft Reset
+    The following registers are reset: MCR (except the MDIS bit), TIMER , ECR, ESR1, ESR2,
+    IMASK1, IMASK2, IFLAG1, IFLAG2 and CRCR. Configuration registers that control the interface to the
+    CAN bus are not affected by soft reset.
+    The following registers are unaffected: CTRL1, CTRL2, all RXIMR
+    registers, RXMGMASK, RX14MASK, RX15MASK, RXFGMASK, RXFIR, all Message Buffers .
+  */
+
+  bool frz_flag_negate = 0;
+  if ( !(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FRZ_ACK) ) { // currently not in freeze mode
+    frz_flag_negate = 1; FLEXCAN_EnterFreezeMode();
+  }
+
+  uint32_t mcr = FLEXCANb_MCR(_baseAddress);
+  uint32_t imask1 = FLEXCANb_IMASK1(_baseAddress);
+
+  FLEXCANb_MCR(_baseAddress) ^= FLEXCAN_MCR_SOFT_RST;
+  while (FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_SOFT_RST);
+
+  FLEXCANb_MCR(_baseAddress) = mcr;
+  FLEXCANb_IMASK1(_baseAddress) = imask1;
+  FLEXCANb_IFLAG1(_baseAddress) = FLEXCANb_IFLAG1(_baseAddress);
+
+  if ( frz_flag_negate ) FLEXCAN_ExitFreezeMode();
+}
+
 
 
 void IFCT::enableFIFO(bool status) {
@@ -215,9 +245,11 @@ void IFCT::setBaudRate(uint32_t baud) {
   uint32_t divisor = 0, bestDivisor = 0, result = 16000000 / baud / (divisor + 1);
   int error = baud - (16000000 / (result * (divisor + 1))), bestError = error;
   bool frz_flag_negate = 0;
+
   if ( !(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FRZ_ACK) ) { // currently not in freeze mode
     frz_flag_negate = 1; FLEXCAN_EnterFreezeMode();
   }
+
   while (result > 5) {
     divisor++;
     result = 16000000 / baud / (divisor + 1);
@@ -336,8 +368,35 @@ void IFCT::setMaxMB(uint8_t last) {
 
 
 void IFCT::FLEXCAN_EnterFreezeMode() {
+  /*
+    in order to prevent lockups when entering freeze mode, datasheet states:
+
+    NOTE:
+      FRZACK will be asserted within 178 CAN bits from the freeze mode request by the CPU, and
+      negated within 2 CAN bits after the freeze mode request removal (see Section "Protocol Timing").
+
+    If there is an issue on the network or even running in single node mode, entering the FRZ state can hard lockup
+    the processor, as the while loop will never exit. Rather than resetting the flexcan controller and setting up mcr
+    and interrupt registers to deal with this, we simply disable the pins temporarily which gives it immediate access
+    to freeze mode without any hard lockups.
+  */
+
+  if ( currentPins[0] == 3 ) CORE_PIN3_CONFIG = 0;
+  else if ( currentPins[0] == 29 ) CORE_PIN29_CONFIG = 0;
+  else if ( currentPins[0] == 33 ) CORE_PIN33_CONFIG = 0;
+  if ( currentPins[1] == 4 ) CORE_PIN4_CONFIG = 0;
+  else if ( currentPins[1] == 30 ) CORE_PIN30_CONFIG = 0;
+  else if ( currentPins[1] == 34 ) CORE_PIN34_CONFIG = 0;
+
   FLEXCANb_MCR(_baseAddress) |= FLEXCAN_MCR_HALT;
   while (!(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FRZ_ACK));
+
+  if ( currentPins[0] == 3 ) CORE_PIN3_CONFIG = PORT_PCR_MUX(2);
+  else if ( currentPins[0] == 29 ) CORE_PIN29_CONFIG = PORT_PCR_MUX(2);
+  else if ( currentPins[0] == 33 ) CORE_PIN33_CONFIG = PORT_PCR_MUX(2);
+  if ( currentPins[1] == 4 ) CORE_PIN4_CONFIG = PORT_PCR_MUX(2);
+  else if ( currentPins[1] == 30 ) CORE_PIN30_CONFIG = PORT_PCR_MUX(2);
+  else if ( currentPins[1] == 34 ) CORE_PIN34_CONFIG = PORT_PCR_MUX(2);
 }
 
 void IFCT::FLEXCAN_ExitFreezeMode() {
@@ -996,15 +1055,18 @@ void IFCT::setTX(IFCTALTPIN which) {
 
 #if defined(__MK20DX256__)
   CORE_PIN3_CONFIG = PORT_PCR_MUX(2);
+  currentPins[0] = 3;
 #endif
 
 #if defined(__MK64FX512__) || defined(__MK66FX1M0__)
   if ( _baseAddress == FLEXCAN0_BASE ) {
     if ( which == ALT ) {
       CORE_PIN3_CONFIG = 0; CORE_PIN29_CONFIG = PORT_PCR_MUX(2);
+      currentPins[0] = 29;
     }
     else if ( which == DEF ) {
       CORE_PIN29_CONFIG = 0; CORE_PIN3_CONFIG = PORT_PCR_MUX(2);
+      currentPins[0] = 3;
     }
   } /* Alternative CAN1 pins are not broken out on Teensy 3.6 */
 #endif
@@ -1012,6 +1074,7 @@ void IFCT::setTX(IFCTALTPIN which) {
 #if defined(__MK66FX1M0__)
   if ( _baseAddress == FLEXCAN1_BASE ) {
       CORE_PIN33_CONFIG = PORT_PCR_MUX(2);
+      currentPins[0] = 33;
   }
 #endif
 
@@ -1024,15 +1087,18 @@ void IFCT::setRX(IFCTALTPIN which) {
 
 #if defined(__MK20DX256__)
   CORE_PIN4_CONFIG = PORT_PCR_MUX(2);
+  currentPins[1] = 4;
 #endif
 
 #if defined(__MK64FX512__) || defined(__MK66FX1M0__)
   if ( _baseAddress == FLEXCAN0_BASE ) {
     if ( which == ALT ) {
       CORE_PIN4_CONFIG = 0; CORE_PIN30_CONFIG = PORT_PCR_MUX(2);
+      currentPins[1] = 30;
     }
     else if ( which == DEF ) {
       CORE_PIN30_CONFIG = 0; CORE_PIN4_CONFIG = PORT_PCR_MUX(2);
+      currentPins[1] = 4;
     }
   } /* Alternative CAN1 pins are not broken out on Teensy 3.6 */
 #endif
@@ -1040,6 +1106,7 @@ void IFCT::setRX(IFCTALTPIN which) {
 #if defined(__MK66FX1M0__)
   if ( _baseAddress == FLEXCAN1_BASE ) {
       CORE_PIN34_CONFIG = PORT_PCR_MUX(2);
+      currentPins[1] = 34;
   }
 #endif
 
@@ -1456,46 +1523,10 @@ void IFCT::setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, uint32_t id
 }
 
 
-void IFCT::autoBaud() {
-  FLEXCAN_EnterFreezeMode();
-  FLEXCANb_CTRL1(_baseAddress) |= FLEXCAN_CTRL_LOM; /* listen only mode enable */
-  uint32_t mcr = FLEXCANb_MCR(_baseAddress); /* we store the MCR, as softReset wipes it out! */
-  uint32_t imask1 = FLEXCANb_IMASK1(_baseAddress); /* we store MB/FIFO interrupt register */
-  FLEXCANb_IMASK1(_baseAddress) = 0; /* we clear MB/FIFO interrupt register */
-  FLEXCAN_ExitFreezeMode();
-
-  const uint32_t speeds[] = { 10000, 20000, 33333, 50000, 83333, 125000, 250000, 500000, 800000, 1000000 };
-  uint8_t count = sizeof(speeds) / sizeof(speeds[0]);
-
-  uint32_t esr1 = 0;
-
-  while ( count-- ) {
-    FLEXCAN_EnterFreezeMode();
-    softReset();
-    FLEXCANb_MCR(_baseAddress) = mcr;
-    FLEXCAN_ExitFreezeMode();
-    FLEXCANb_IFLAG1(_baseAddress) = FLEXCANb_IFLAG1(_baseAddress); /* clear interrupt flagged bits */
-    setBaudRate(speeds[count]);
-    uint32_t timeout = millis();
-    while ( millis() - timeout < 25 ) esr1 = FLEXCANb_ESR1(_baseAddress);
-    if ( !esr1 ) continue; /* skip bitrates that don't have synch bit set */
-    if ( !FLEXCAN_ESR_get_fault_code(esr1) && (esr1 & (1UL << 18)) ) break;
-  }
-
-  if ( !FLEXCAN_ESR_get_fault_code(esr1) && (esr1 & (1UL << 18)) ) { /* captured valid bitrate */
-    FLEXCAN_EnterFreezeMode();
-    FLEXCANb_CTRL1(_baseAddress) &= ~FLEXCAN_CTRL_LOM; /* listen only mode disable */
-    FLEXCAN_ExitFreezeMode();
-  }
-
-  FLEXCANb_IMASK1(_baseAddress) = imask1; /* finally, we restore MB/FIFO interrupt register */
-}
-
-
 
 bool IFCT::connected() {
   uint32_t esr1 = FLEXCANb_ESR1(_baseAddress);
-  if ( (esr1 & (1UL << 18)) && !FLEXCAN_ESR_get_fault_code(esr1) ) return 1;
+  if ( esr1&0x40000 && !(esr1&0xF000) && !(esr1&0x30) ) return 1; /* synch, no crc/ack/bit errors */
   return 0;
 }
 
@@ -1512,4 +1543,47 @@ void IFCT::events() {
     sendMSGtoIndividualMBCallback((IFCTMBNUM)frame.mb, frame); 
   }
 
+}
+
+
+bool IFCT::autoBaud() {
+
+  const uint32_t speeds[] = { 10000, 20000, 33333, 50000, 83333, 125000, 250000, 500000, 800000, 1000000 };
+  uint8_t count = sizeof(speeds) / sizeof(speeds[0]);
+  bool found = 0;
+  uint32_t esr1 = (FLEXCANb_ESR1(_baseAddress) = 0x6); // clear and set the variable
+
+  while ( count ) {
+    count--;
+    esr1 = (FLEXCANb_ESR1(_baseAddress) = 0x6);
+    FLEXCAN_EnterFreezeMode();
+    FLEXCANb_ECR(_baseAddress) = 0;
+    softResetRestore();
+    setBaudRate(speeds[count]);
+    FLEXCANb_CTRL1(_baseAddress) |= FLEXCAN_CTRL_LOM; /* listen only mode enable */
+    FLEXCAN_ExitFreezeMode();
+
+    uint32_t timeout = millis();
+    while ( millis() - timeout < 79 ) {
+      esr1 = FLEXCANb_ESR1(_baseAddress);
+      esr1 = FLEXCANb_ESR1(_baseAddress);
+      if ( millis() - timeout > 29 ) {
+        if ( !(esr1&0x2) && esr1&0x40000 && (esr1&0x8) && !(esr1&0xF000) && !(esr1&0x400) ) {
+          found = 1;
+          break;
+        }
+      }
+    }
+    if ( found ) break;
+  }
+
+  if ( found ) {
+    FLEXCAN_EnterFreezeMode();
+    FLEXCANb_CTRL1(_baseAddress) &= ~FLEXCAN_CTRL_LOM; /* unset listen-only mode */
+    FLEXCAN_ExitFreezeMode();
+    return 1;
+  }
+
+  currentBitrate = 0;
+  return 0;
 }
