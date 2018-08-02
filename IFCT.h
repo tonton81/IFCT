@@ -53,6 +53,7 @@
 #define FLEXCANb_MB_MASK(b, n)            (*(vuint32_t*)(b+0x880+(n*4)))
 #define FLEXCANb_ESR1(b) (*(vuint32_t*)(b+0x20))
 #define FLEXCANb_MAXMB_SIZE(b)            (((FLEXCANb_MCR(b) & FLEXCAN_MCR_MAXMB_MASK) & 0x7F)+1)
+#define FLEXCANb_ECR(b) (*(vuint32_t*)(b+0x1C))
 
 #define FLEXCAN_BUFFER_SIZE 16
 
@@ -129,7 +130,7 @@ class IFCT {
     void disableFIFO();
     void setBaudRate(uint32_t baud = 1000000);
     uint32_t getBaudRate() { return currentBitrate; }
-    void autoBaud();
+    bool autoBaud();
     bool connected();
     void setMB(const IFCTMBNUM &mb_num, const IFCTMBTXRX &mb_rx_tx, const IFCTMBIDE &ide = STD);
     void enableMBInterrupt(const IFCTMBNUM &mb_num, bool status = 1);
@@ -187,6 +188,7 @@ class IFCT {
     void setFIFOFilterRange(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide1, const IFCTMBIDE &remote1, uint32_t id3, uint32_t id4, const IFCTMBIDE &ide2, const IFCTMBIDE &remote2); /* TableB dual range based IDs */
     void setRFFN(uint8_t rffn); /* Number Of Rx FIFO Filters (0 == 8 filters, 1 == 16 filters, etc.. */
     void setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4 ); /* TableC 4 partial IDs per filter */
+    void reset() { softResetRestore(); } /* reset flexcan controller while retaining configuration */
 
   private:
     static bool can_events;
@@ -197,12 +199,14 @@ class IFCT {
     uint32_t NVIC_IRQ = 0UL;
     uint32_t currentBitrate = 0UL;
     void softReset();
+    void softResetRestore(); // copy and restore affected registers after reset
     void FLEXCAN_EnterFreezeMode();
     void FLEXCAN_ExitFreezeMode();
     void setMBFilterProcessing(IFCTMBNUM mb_num, uint32_t filter_id, uint32_t calculated_mask);
     bool filter_enhancement[16][2] = { { 0 } , { 0 } }; /* enhancement feature, first being enable bit, second being multiID or range based. */
     uint32_t filter_enhancement_config[16][5] = { { 0 } , { 0 } }; /* storage for filter IDs */
     bool fifo_filter_set[16] = { 0 };
+    uint8_t currentPins[2] = { 0 };
 };
 extern IFCT Can0;
 extern IFCT Can1;
