@@ -30,6 +30,11 @@
 #include <kinetis_flexcan.h>
 #include <kinetis.h>
 #include "Arduino.h"
+IntervalTimer CAN_timer[2];
+#include "TeensyThreads.h"
+Threads::Mutex CAN_THREAD[2];
+
+
 
 Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexcan_buffer;
 bool IFCT::can_events = 0;
@@ -381,22 +386,43 @@ void IFCT::FLEXCAN_EnterFreezeMode() {
     to freeze mode without any hard lockups.
   */
 
-  if ( currentPins[0] == 3 ) CORE_PIN3_CONFIG = 0;
-  else if ( currentPins[0] == 29 ) CORE_PIN29_CONFIG = 0;
-  else if ( currentPins[0] == 33 ) CORE_PIN33_CONFIG = 0;
-  if ( currentPins[1] == 4 ) CORE_PIN4_CONFIG = 0;
-  else if ( currentPins[1] == 30 ) CORE_PIN30_CONFIG = 0;
-  else if ( currentPins[1] == 34 ) CORE_PIN34_CONFIG = 0;
+  uint8_t rx = 0, tx = 0;
+  uint32_t pinBackupRx = 0, pinBackupTx = 0;
+
+  if ( ( CORE_PIN3_CONFIG & 0x700 ) == 0x200 ) {
+    tx = 3; pinBackupTx = CORE_PIN3_CONFIG; CORE_PIN3_CONFIG = 0;
+  }
+  else if ( ( CORE_PIN29_CONFIG & 0x700 ) == 0x200 ) {
+    tx = 29; pinBackupTx = CORE_PIN29_CONFIG; CORE_PIN29_CONFIG = 0;
+  }
+  else if ( ( CORE_PIN33_CONFIG & 0x700 ) == 0x200 ) {
+    tx = 33; pinBackupTx = CORE_PIN33_CONFIG; CORE_PIN33_CONFIG = 0;
+  }
+
+  if ( ( CORE_PIN4_CONFIG & 0x700 ) == 0x200 ) {
+    rx = 4; pinBackupRx = CORE_PIN4_CONFIG; CORE_PIN4_CONFIG = 0;
+  }
+  else if ( ( CORE_PIN30_CONFIG & 0x700 ) == 0x200 ) {
+    rx = 30; pinBackupRx = CORE_PIN30_CONFIG; CORE_PIN30_CONFIG = 0;
+  }
+#if defined(__MK64FX512__) || defined(__MK66FX1M0__)
+  else if ( ( CORE_PIN34_CONFIG & 0x700 ) == 0x200 ) {
+    rx = 34; pinBackupRx = CORE_PIN34_CONFIG; CORE_PIN34_CONFIG = 0;
+  }
+#endif
 
   FLEXCANb_MCR(_baseAddress) |= FLEXCAN_MCR_HALT;
   while (!(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FRZ_ACK));
 
-  if ( currentPins[0] == 3 ) CORE_PIN3_CONFIG = PORT_PCR_MUX(2);
-  else if ( currentPins[0] == 29 ) CORE_PIN29_CONFIG = PORT_PCR_MUX(2);
-  else if ( currentPins[0] == 33 ) CORE_PIN33_CONFIG = PORT_PCR_MUX(2);
-  if ( currentPins[1] == 4 ) CORE_PIN4_CONFIG = PORT_PCR_MUX(2);
-  else if ( currentPins[1] == 30 ) CORE_PIN30_CONFIG = PORT_PCR_MUX(2);
-  else if ( currentPins[1] == 34 ) CORE_PIN34_CONFIG = PORT_PCR_MUX(2);
+  if ( tx == 3 ) CORE_PIN3_CONFIG = pinBackupTx;
+  else if ( tx == 29 ) CORE_PIN29_CONFIG = pinBackupTx;
+  else if ( tx == 33 ) CORE_PIN33_CONFIG = pinBackupTx;
+
+  if ( rx == 4 ) CORE_PIN4_CONFIG = pinBackupRx;
+  else if ( rx == 30 ) CORE_PIN30_CONFIG = pinBackupRx;
+#if defined(__MK64FX512__) || defined(__MK66FX1M0__)
+  else if ( rx == 34 ) CORE_PIN34_CONFIG = pinBackupRx;
+#endif
 }
 
 void IFCT::FLEXCAN_ExitFreezeMode() {
@@ -422,113 +448,47 @@ void IFCT::setRRS(bool rrs) { /* store remote frames */
 
 
 void IFCT::onReceive(const IFCTMBNUM &mb_num, _MB_ptr handler) {
-  switch ( mb_num ) {
-    case MB0: {
-        _MB0handler = handler; break;
-      }
-    case MB1: {
-        _MB1handler = handler; break;
-      }
-    case MB2: {
-        _MB2handler = handler; break;
-      }
-    case MB3: {
-        _MB3handler = handler; break;
-      }
-    case MB4: {
-        _MB4handler = handler; break;
-      }
-    case MB5: {
-        _MB5handler = handler; break;
-      }
-    case MB6: {
-        _MB6handler = handler; break;
-      }
-    case MB7: {
-        _MB7handler = handler; break;
-      }
-    case MB8: {
-        _MB8handler = handler; break;
-      }
-    case MB9: {
-        _MB9handler = handler; break;
-      }
-    case MB10: {
-        _MB10handler = handler; break;
-      }
-    case MB11: {
-        _MB11handler = handler; break;
-      }
-    case MB12: {
-        _MB12handler = handler; break;
-      }
-    case MB13: {
-        _MB13handler = handler; break;
-      }
-    case MB14: {
-        _MB14handler = handler; break;
-      }
-    case MB15: {
-        _MB15handler = handler; break;
-      }
-  } // end switch
+  if ( mb_num == MB0 ) _MB0handler = handler;
+  else if ( mb_num == MB1 ) _MB1handler = handler;
+  else if ( mb_num == MB2 ) _MB2handler = handler;
+  else if ( mb_num == MB3 ) _MB3handler = handler;
+  else if ( mb_num == MB4 ) _MB4handler = handler;
+  else if ( mb_num == MB5 ) _MB5handler = handler;
+  else if ( mb_num == MB6 ) _MB6handler = handler;
+  else if ( mb_num == MB7 ) _MB7handler = handler;
+  else if ( mb_num == MB8 ) _MB8handler = handler;
+  else if ( mb_num == MB9 ) _MB9handler = handler;
+  else if ( mb_num == MB10 ) _MB10handler = handler;
+  else if ( mb_num == MB11 ) _MB11handler = handler;
+  else if ( mb_num == MB12 ) _MB12handler = handler;
+  else if ( mb_num == MB13 ) _MB13handler = handler;
+  else if ( mb_num == MB14 ) _MB14handler = handler;
+  else if ( mb_num == MB15 ) _MB15handler = handler;
 }
+
+
 void IFCT::onReceive(_MB_ptr handler) {
   _MBAllhandler = handler;
 }
 
 
 void sendMSGtoIndividualMBCallback(const IFCTMBNUM &mb_num, const CAN_message_t &msg) { /* this is global for ISR use */
-  switch (mb_num) {
-    case MB0: {
-        if ( IFCT::_MB0handler != nullptr ) IFCT::_MB0handler(msg); break;
-      }
-    case MB1: {
-        if ( IFCT::_MB1handler != nullptr ) IFCT::_MB1handler(msg); break;
-      }
-    case MB2: {
-        if ( IFCT::_MB2handler != nullptr ) IFCT::_MB2handler(msg); break;
-      }
-    case MB3: {
-        if ( IFCT::_MB3handler != nullptr ) IFCT::_MB3handler(msg); break;
-      }
-    case MB4: {
-        if ( IFCT::_MB4handler != nullptr ) IFCT::_MB4handler(msg); break;
-      }
-    case MB5: {
-        if ( IFCT::_MB5handler != nullptr ) IFCT::_MB5handler(msg); break;
-      }
-    case MB6: {
-        if ( IFCT::_MB6handler != nullptr ) IFCT::_MB6handler(msg); break;
-      }
-    case MB7: {
-        if ( IFCT::_MB7handler != nullptr ) IFCT::_MB7handler(msg); break;
-      }
-    case MB8: {
-        if ( IFCT::_MB8handler != nullptr ) IFCT::_MB8handler(msg); break;
-      }
-    case MB9: {
-        if ( IFCT::_MB9handler != nullptr ) IFCT::_MB9handler(msg); break;
-      }
-    case MB10: {
-        if ( IFCT::_MB10handler != nullptr ) IFCT::_MB10handler(msg); break;
-      }
-    case MB11: {
-        if ( IFCT::_MB11handler != nullptr ) IFCT::_MB11handler(msg); break;
-      }
-    case MB12: {
-        if ( IFCT::_MB12handler != nullptr ) IFCT::_MB12handler(msg); break;
-      }
-    case MB13: {
-        if ( IFCT::_MB13handler != nullptr ) IFCT::_MB13handler(msg); break;
-      }
-    case MB14: {
-        if ( IFCT::_MB14handler != nullptr ) IFCT::_MB14handler(msg); break;
-      }
-    case MB15: {
-        if ( IFCT::_MB15handler != nullptr ) IFCT::_MB15handler(msg); break;
-      }
-  }
+  if ( mb_num == MB0 && IFCT::_MB0handler != nullptr ) IFCT::_MB0handler(msg);
+  else if ( mb_num == MB1 && IFCT::_MB1handler != nullptr ) IFCT::_MB1handler(msg);
+  else if ( mb_num == MB2 && IFCT::_MB2handler != nullptr ) IFCT::_MB2handler(msg);
+  else if ( mb_num == MB3 && IFCT::_MB3handler != nullptr ) IFCT::_MB3handler(msg);
+  else if ( mb_num == MB4 && IFCT::_MB4handler != nullptr ) IFCT::_MB4handler(msg);
+  else if ( mb_num == MB5 && IFCT::_MB5handler != nullptr ) IFCT::_MB5handler(msg);
+  else if ( mb_num == MB6 && IFCT::_MB6handler != nullptr ) IFCT::_MB6handler(msg);
+  else if ( mb_num == MB7 && IFCT::_MB7handler != nullptr ) IFCT::_MB7handler(msg);
+  else if ( mb_num == MB8 && IFCT::_MB8handler != nullptr ) IFCT::_MB8handler(msg);
+  else if ( mb_num == MB9 && IFCT::_MB9handler != nullptr ) IFCT::_MB9handler(msg);
+  else if ( mb_num == MB10 && IFCT::_MB10handler != nullptr ) IFCT::_MB10handler(msg);
+  else if ( mb_num == MB11 && IFCT::_MB11handler != nullptr ) IFCT::_MB11handler(msg);
+  else if ( mb_num == MB12 && IFCT::_MB12handler != nullptr ) IFCT::_MB12handler(msg);
+  else if ( mb_num == MB13 && IFCT::_MB13handler != nullptr ) IFCT::_MB13handler(msg);
+  else if ( mb_num == MB14 && IFCT::_MB14handler != nullptr ) IFCT::_MB14handler(msg);
+  else if ( mb_num == MB15 && IFCT::_MB15handler != nullptr ) IFCT::_MB15handler(msg);
 }
 
 bool IFCT::pollFIFO(CAN_message_t &msg, bool poll) {
@@ -557,32 +517,38 @@ bool IFCT::pollFIFO(CAN_message_t &msg, bool poll) {
 }
 
 
-int IFCT::write(const CAN_message_t &msg) {
-  int8_t retries = 3;
-retry_tx_flexcan:
+int IFCT::write(const CAN_message_t &msg, uint8_t retries) {
+
   uint8_t mailboxes = 0;
   if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) { /* FIFO is enabled, get only remaining TX (if any) */
     uint32_t remaining_mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - 6 /* MAXMB - FIFO */ - ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2);
     if ( FLEXCANb_MAXMB_SIZE(_baseAddress) < (6 + ((((FLEXCANb_CTRL2(_baseAddress) >> FLEXCAN_CTRL2_RFFN_BIT_NO) & 0xF) + 1) * 2))) remaining_mailboxes = 0;
     mailboxes = FLEXCANb_MAXMB_SIZE(_baseAddress) - remaining_mailboxes;
   }
-  for (uint8_t i = mailboxes; i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++) {
-    if ( FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, i)) == FLEXCAN_MB_CODE_TX_INACTIVE ) {
-      FLEXCANb_IFLAG1(_baseAddress) |= (1 << i); // 1st step clear flag in case it's set as per datasheet
-      if (msg.flags.extended) FLEXCANb_MBn_ID(_baseAddress, i) = (msg.id & FLEXCAN_MB_ID_EXT_MASK);
-      else FLEXCANb_MBn_ID(_baseAddress, i) = FLEXCAN_MB_ID_IDSTD(msg.id);
-      FLEXCANb_MBn_WORD0(_baseAddress, i) = (msg.buf[0] << 24) | (msg.buf[1] << 16) | (msg.buf[2] << 8) | msg.buf[3];
-      FLEXCANb_MBn_WORD1(_baseAddress, i) = (msg.buf[4] << 24) | (msg.buf[5] << 16) | (msg.buf[6] << 8) | msg.buf[7];
 
-      uint32_t options = 0;
-      if ( msg.flags.remote ) options |= FLEXCAN_MB_CS_RTR;
-      if ( msg.flags.extended ) options |= FLEXCAN_MB_CS_IDE | FLEXCAN_MB_CS_SRR;
-      FLEXCANb_MBn_CS(_baseAddress, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_ONCE) | FLEXCAN_MB_CS_LENGTH(msg.len) | options;
+  while ( retries ) {
+    retries--;
 
-      return 1; /* transmit entry accepted */
-    } // CODE CHECK
-  } // FOR LOOP
-  if ( retries-- > 0 ) goto retry_tx_flexcan;
+    for (uint8_t i = mailboxes; i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++) {
+      if ( FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, i)) == FLEXCAN_MB_CODE_TX_INACTIVE ) {
+        FLEXCANb_IFLAG1(_baseAddress) |= (1 << i); // 1st step clear flag in case it's set as per datasheet
+        if (msg.flags.extended) FLEXCANb_MBn_ID(_baseAddress, i) = (msg.id & FLEXCAN_MB_ID_EXT_MASK);
+        else FLEXCANb_MBn_ID(_baseAddress, i) = FLEXCAN_MB_ID_IDSTD(msg.id);
+        FLEXCANb_MBn_WORD0(_baseAddress, i) = (msg.buf[0] << 24) | (msg.buf[1] << 16) | (msg.buf[2] << 8) | msg.buf[3];
+        FLEXCANb_MBn_WORD1(_baseAddress, i) = (msg.buf[4] << 24) | (msg.buf[5] << 16) | (msg.buf[6] << 8) | msg.buf[7];
+
+        FLEXCANb_MBn_CS(_baseAddress, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_ONCE) |
+                                            FLEXCAN_MB_CS_LENGTH(msg.len) |
+                                            ((msg.flags.remote) ? FLEXCAN_MB_CS_RTR : 0UL) |
+                                            ((msg.flags.extended) ? FLEXCAN_MB_CS_IDE : 0UL) |
+                                            ((msg.flags.extended) ? FLEXCAN_MB_CS_SRR : 0UL);
+
+        return 1; /* transmit entry accepted */
+      } // CODE CHECK
+    } // FOR LOOP
+    delay(25);
+  } // RETRY LOOP
+
   return 0; /* transmit entry failed, no mailboxes available */
 }
 
@@ -605,10 +571,11 @@ int IFCT::write(IFCTMBNUM mb_num, const CAN_message_t &msg) {
   FLEXCANb_MBn_WORD0(_baseAddress, mb_num) = (msg.buf[0] << 24) | (msg.buf[1] << 16) | (msg.buf[2] << 8) | msg.buf[3];
   FLEXCANb_MBn_WORD1(_baseAddress, mb_num) = (msg.buf[4] << 24) | (msg.buf[5] << 16) | (msg.buf[6] << 8) | msg.buf[7];
 
-  uint32_t options = 0;
-  if ( msg.flags.remote ) options |= FLEXCAN_MB_CS_RTR;
-  if ( msg.flags.extended ) options |= FLEXCAN_MB_CS_IDE | FLEXCAN_MB_CS_SRR;
-  FLEXCANb_MBn_CS(_baseAddress, mb_num) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_ONCE) | FLEXCAN_MB_CS_LENGTH(msg.len) | options;
+  FLEXCANb_MBn_CS(_baseAddress, mb_num) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_ONCE) |
+                                      FLEXCAN_MB_CS_LENGTH(msg.len) |
+                                      ((msg.flags.remote) ? FLEXCAN_MB_CS_RTR : 0UL) |
+                                      ((msg.flags.extended) ? FLEXCAN_MB_CS_IDE : 0UL) |
+                                      ((msg.flags.extended) ? FLEXCAN_MB_CS_SRR : 0UL);
 
   return 1; // transmit entry accepted //
 }
@@ -1055,18 +1022,15 @@ void IFCT::setTX(IFCTALTPIN which) {
 
 #if defined(__MK20DX256__)
   CORE_PIN3_CONFIG = PORT_PCR_MUX(2);
-  currentPins[0] = 3;
 #endif
 
 #if defined(__MK64FX512__) || defined(__MK66FX1M0__)
   if ( _baseAddress == FLEXCAN0_BASE ) {
     if ( which == ALT ) {
       CORE_PIN3_CONFIG = 0; CORE_PIN29_CONFIG = PORT_PCR_MUX(2);
-      currentPins[0] = 29;
     }
     else if ( which == DEF ) {
       CORE_PIN29_CONFIG = 0; CORE_PIN3_CONFIG = PORT_PCR_MUX(2);
-      currentPins[0] = 3;
     }
   } /* Alternative CAN1 pins are not broken out on Teensy 3.6 */
 #endif
@@ -1074,7 +1038,6 @@ void IFCT::setTX(IFCTALTPIN which) {
 #if defined(__MK66FX1M0__)
   if ( _baseAddress == FLEXCAN1_BASE ) {
       CORE_PIN33_CONFIG = PORT_PCR_MUX(2);
-      currentPins[0] = 33;
   }
 #endif
 
@@ -1087,18 +1050,15 @@ void IFCT::setRX(IFCTALTPIN which) {
 
 #if defined(__MK20DX256__)
   CORE_PIN4_CONFIG = PORT_PCR_MUX(2);
-  currentPins[1] = 4;
 #endif
 
 #if defined(__MK64FX512__) || defined(__MK66FX1M0__)
   if ( _baseAddress == FLEXCAN0_BASE ) {
     if ( which == ALT ) {
       CORE_PIN4_CONFIG = 0; CORE_PIN30_CONFIG = PORT_PCR_MUX(2);
-      currentPins[1] = 30;
     }
     else if ( which == DEF ) {
       CORE_PIN30_CONFIG = 0; CORE_PIN4_CONFIG = PORT_PCR_MUX(2);
-      currentPins[1] = 4;
     }
   } /* Alternative CAN1 pins are not broken out on Teensy 3.6 */
 #endif
@@ -1106,7 +1066,6 @@ void IFCT::setRX(IFCTALTPIN which) {
 #if defined(__MK66FX1M0__)
   if ( _baseAddress == FLEXCAN1_BASE ) {
       CORE_PIN34_CONFIG = PORT_PCR_MUX(2);
-      currentPins[1] = 34;
   }
 #endif
 
@@ -1532,17 +1491,21 @@ bool IFCT::connected() {
 
 
 
-void IFCT::events() {
+uint16_t IFCT::events() {
 
-  if ( !can_events ) can_events = 1; /* handle callbacks from loop */
+  { Threads::Scope scope(CAN_THREAD[((this == &Can0) ? 0 : 1)]);
 
-  if ( flexcan_buffer.size() ) { /* if a queue frame is available */
-    CAN_message_t frame;
-    queue2struct(frame);
-    if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(frame);
-    sendMSGtoIndividualMBCallback((IFCTMBNUM)frame.mb, frame); 
-  }
+    if ( !can_events ) can_events = 1; /* handle callbacks from loop */
 
+    if ( flexcan_buffer.size() ) { /* if a queue frame is available */
+      CAN_message_t frame;
+      queue2struct(frame);
+      if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(frame);
+      sendMSGtoIndividualMBCallback((IFCTMBNUM)frame.mb, frame); 
+      return flexcan_buffer.size();
+    }
+  } // SCOPE LOCK END 
+  return 0;
 }
 
 
@@ -1586,4 +1549,87 @@ bool IFCT::autoBaud() {
 
   currentBitrate = 0;
   return 0;
+}
+
+
+// ################################################################################################################
+// ########################################  /* INTERVALTIMER */ ##################################################
+// ################################################################################################################
+
+void intervalTimerCan0() {
+  Can0.events();
+}
+
+#if defined(__MK66FX1M0__)
+void intervalTimerCan1() {
+  Can1.events();
+}
+#endif
+
+void IFCT::intervalTimer(bool enable, uint32_t time, uint8_t priority) {
+  if ( this == &Can0 ) {
+    if ( enable ) {
+      CAN_timer[0].begin(intervalTimerCan0, time);
+      CAN_timer[0].priority(priority);
+      teensyThread(0);
+    }
+    else CAN_timer[0].end();
+  }
+#if defined(__MK66FX1M0__)
+  if ( this == &Can1 ) {
+    if ( enable ) {
+      CAN_timer[1].begin(intervalTimerCan1, time);
+      CAN_timer[1].priority(priority);
+      teensyThread(0);
+    }
+    else CAN_timer[1].end();
+  }
+#endif
+}
+
+
+
+// ################################################################################################################
+// ########################################  /* TEENSYTHREADS */ ##################################################
+// ################################################################################################################
+
+uint8_t can0_thread_block = 0;
+uint8_t can1_thread_block = 0;
+
+void can0_thread() {
+  while(1) {
+    if ( !can0_thread_block ) Can0.events();
+  }
+}
+
+#if defined(__MK66FX1M0__)
+void can1_thread() {
+  while(1) {
+    if ( !can1_thread_block ) Can1.events();
+  }
+}
+#endif
+
+void IFCT::teensyThread(bool enable) {
+  if ( this == &Can0 ) {
+    if ( enable ) {
+      intervalTimer(0);
+      static bool once = 1;
+      if ( once ) threads.addThread(can0_thread);
+      once = 0;
+      can0_thread_block = 0;
+    }
+    else can0_thread_block = 1;
+  }
+#if defined(__MK66FX1M0__)
+  if ( this == &Can1 ) {
+    if ( enable ) {
+      static bool once = 1;
+      if ( once ) threads.addThread(can1_thread);
+      once = 0;
+      can1_thread_block = 0;
+    }
+    else can1_thread_block = 1;
+  }
+#endif
 }
