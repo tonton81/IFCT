@@ -156,7 +156,7 @@ class IFCT {
     static _MB_ptr _MB15handler; 
     static _MB_ptr _MBAllhandler; 
     bool pollFIFO(CAN_message_t &msg, bool poll = 1);
-    int write(const CAN_message_t &msg); /* use any available mailbox for transmitting */
+    int write(const CAN_message_t &msg, uint8_t retries = 3); /* use any available mailbox for transmitting, with optional retries */
     int write(IFCTMBNUM mb_num, const CAN_message_t &msg); /* use a single mailbox for transmitting */
     int read(CAN_message_t &msg);
     int readMB(CAN_message_t &msg);
@@ -176,7 +176,7 @@ class IFCT {
     void setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4, uint32_t id5); /* input 5 ID's to be filtered */
     void setMBFilterRange(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2); /* filter a range of ids */
     void enhanceFilter(IFCTMBNUM mb_num);
-    void events();
+    uint16_t events();
     static Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> flexcan_buffer; /* create an array buffer of struct size, 16 levels deep. */
     void setFIFOFilter(const IFCTMBFLTEN &input);
     void setFIFOFilter(uint8_t filter, uint32_t id1, const IFCTMBIDE &ide, const IFCTMBIDE &remote = NONE); /* single ID per filter */
@@ -189,6 +189,8 @@ class IFCT {
     void setRFFN(uint8_t rffn); /* Number Of Rx FIFO Filters (0 == 8 filters, 1 == 16 filters, etc.. */
     void setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4 ); /* TableC 4 partial IDs per filter */
     void reset() { softResetRestore(); } /* reset flexcan controller while retaining configuration */
+    void intervalTimer(bool enable = 1, uint32_t time = 150, uint8_t priority = 128);
+    void teensyThread(bool enable = 1);
 
   private:
     static bool can_events;
@@ -206,7 +208,6 @@ class IFCT {
     bool filter_enhancement[16][2] = { { 0 } , { 0 } }; /* enhancement feature, first being enable bit, second being multiID or range based. */
     uint32_t filter_enhancement_config[16][5] = { { 0 } , { 0 } }; /* storage for filter IDs */
     bool fifo_filter_set[16] = { 0 };
-    uint8_t currentPins[2] = { 0 };
 };
 extern IFCT Can0;
 extern IFCT Can1;
