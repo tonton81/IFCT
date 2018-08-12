@@ -1395,7 +1395,7 @@ bool IFCT::setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTM
 
   filter_set[filter] = 1; /* show that it's set */
   for ( uint8_t i = 0; i < mailboxOffset(); i++ ) filter_enhancement[i][0] = 0; /* disable FIFO enhancement */
-  filter_enhancement[filter][1] = 1; /* set it as multi id based */
+  filter_enhancement[filter][1] = 0; /* set it as multi id based */
   filter_enhancement_config[filter][0] = id1;
   filter_enhancement_config[filter][1] = id2;
   filter_enhancement_config[filter][2] = id3;
@@ -1404,26 +1404,8 @@ bool IFCT::setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTM
 
   FLEXCAN_EnterFreezeMode();
 
-  uint32_t stage1 = id1, stage2 = id1;
-
-  for ( uint32_t i = id1 + 1; i <= id2; i++ ) {
-    stage1 |= i; stage2 &= i;
-  }
-
-  uint32_t mask = ( ide1 != EXT ) ? (((stage1 ^ stage2) ^ 0x7FF) << 19) | 0xC0070000 : (((stage1 ^ stage2) ^ 0x3FFF) << 16) | 0xC0000000;
-
-  stage1 = stage2 = id3;
-
-  for ( uint32_t i = id3 + 1; i <= id4; i++ ) {
-    stage1 |= i; stage2 &= i;
-  }
-
-  ( ide2 != EXT ) ? mask |= (((stage1 ^ stage2) ^ 0x7FF) << 3) | 0xC007 : mask |= (((stage1 ^ stage2) ^ 0x3FFF) << 0) | 0xC000;
-
-
-  mask = ( ide1 != EXT ) ? ((((id1 | id2) ^ (id1 & id2)) ^ 0x7FF) << 19 ) | 0xC0070000 : ((((id1 | id2) ^ (id1 & id2)) ^ 0x3FFF) << 16 ) | 0xC0000000;
+  uint32_t mask = ( ide1 != EXT ) ? ((((id1 | id2) ^ (id1 & id2)) ^ 0x7FF) << 19 ) | 0xC0070000 : ((((id1 | id2) ^ (id1 & id2)) ^ 0x3FFF) << 16 ) | 0xC0000000;
   mask |= ( ide2 != EXT ) ? ((((id3 | id4) ^ (id3 & id4)) ^ 0x7FF) << 3 ) | 0xC007 : ((((id3 | id4) ^ (id3 & id4)) ^ 0x3FFF) << 0 ) | 0xC000;
-
 
   FLEXCANb_IDFLT_TAB(_baseAddress, filter) = ((ide1 == EXT ? 1 : 0) << 30) | ((ide2 == EXT ? 1 : 0) << 14) | /* STD IDs / EXT IDs */
       ((remote1 == RTR ? 1 : 0) << 31) | ((remote2 == RTR ? 1 : 0) << 15) | /* remote frames */
