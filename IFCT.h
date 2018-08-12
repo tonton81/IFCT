@@ -132,29 +132,14 @@ class IFCT {
     uint32_t getBaudRate() { return currentBitrate; }
     bool autoBaud();
     bool connected();
-    void setMB(const IFCTMBNUM &mb_num, const IFCTMBTXRX &mb_rx_tx, const IFCTMBIDE &ide = STD);
+    bool setMB(const IFCTMBNUM &mb_num, const IFCTMBTXRX &mb_rx_tx, const IFCTMBIDE &ide = STD);
     void enableMBInterrupt(const IFCTMBNUM &mb_num, bool status = 1);
     void disableMBInterrupt(const IFCTMBNUM &mb_num);
     void onReceive(const IFCTMBNUM &mb_num, _MB_ptr handler); /* individual mailbox callback function */
     void onReceive(_MB_ptr handler); /* global callback function */
     void mailboxStatus(); /* shows status of each mailbox, RX, TX, FIFO, etc... */
-    static _MB_ptr _MB0handler; 
-    static _MB_ptr _MB1handler; 
-    static _MB_ptr _MB2handler; 
-    static _MB_ptr _MB3handler; 
-    static _MB_ptr _MB4handler; 
-    static _MB_ptr _MB5handler; 
-    static _MB_ptr _MB6handler; 
-    static _MB_ptr _MB7handler; 
-    static _MB_ptr _MB8handler; 
-    static _MB_ptr _MB9handler; 
-    static _MB_ptr _MB10handler; 
-    static _MB_ptr _MB11handler; 
-    static _MB_ptr _MB12handler; 
-    static _MB_ptr _MB13handler; 
-    static _MB_ptr _MB14handler; 
-    static _MB_ptr _MB15handler; 
-    static _MB_ptr _MBAllhandler; 
+    static _MB_ptr _MBhandlers[16]; /* individual mailbox handlers */
+    static _MB_ptr _MBAllhandler; /* global mailbox handler */
     bool pollFIFO(CAN_message_t &msg, bool poll = 1);
     int write(const CAN_message_t &msg, uint8_t retries = 3); /* use any available mailbox for transmitting, with optional retries */
     int write(IFCTMBNUM mb_num, const CAN_message_t &msg); /* use a single mailbox for transmitting */
@@ -169,28 +154,30 @@ class IFCT {
     void setMaxMB(uint8_t last = 16);
     void setMBFilter(IFCTMBFLTEN input); /* enable/disable traffic for all MBs (for individual masking) */
     void setMBFilter(IFCTMBNUM mb_num, IFCTMBFLTEN input); /* set specific MB to accept/deny traffic */
-    void setMBFilter(IFCTMBNUM mb_num, uint32_t id1); /* input 1 ID to be filtered */
-    void setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2); /* input 2 ID's to be filtered */
-    void setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3); /* input 3 ID's to be filtered */
-    void setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4); /* input 4 ID's to be filtered */
-    void setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4, uint32_t id5); /* input 5 ID's to be filtered */
-    void setMBFilterRange(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2); /* filter a range of ids */
+    bool setMBFilter(IFCTMBNUM mb_num, uint32_t id1); /* input 1 ID to be filtered */
+    bool setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2); /* input 2 ID's to be filtered */
+    bool setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3); /* input 3 ID's to be filtered */
+    bool setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4); /* input 4 ID's to be filtered */
+    bool setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4, uint32_t id5); /* input 5 ID's to be filtered */
+    bool setMBFilterRange(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2); /* filter a range of ids */
     void enhanceFilter(IFCTMBNUM mb_num);
     uint16_t events();
     static Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> flexcan_buffer; /* create an array buffer of struct size, 16 levels deep. */
     void setFIFOFilter(const IFCTMBFLTEN &input);
-    void setFIFOFilter(uint8_t filter, uint32_t id1, const IFCTMBIDE &ide, const IFCTMBIDE &remote = NONE); /* single ID per filter */
-    void setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide, const IFCTMBIDE &remote = NONE); /* 2 ID's per filter */
-    void setFIFOFilterRange(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide, const IFCTMBIDE &remote = NONE); /* ID range per filter */
+    bool setFIFOFilter(uint8_t filter, uint32_t id1, const IFCTMBIDE &ide, const IFCTMBIDE &remote = NONE); /* single ID per filter */
+    bool setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide, const IFCTMBIDE &remote = NONE); /* 2 ID's per filter */
+    bool setFIFOFilterRange(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide, const IFCTMBIDE &remote = NONE); /* ID range per filter */
     void setFIFOFilterTable(IFCTFIFOTABLE letter);
-    void setFIFOFilter(uint8_t filter, uint32_t id1, const IFCTMBIDE &ide1, const IFCTMBIDE &remote1, uint32_t id2, const IFCTMBIDE &ide2, const IFCTMBIDE &remote2); /* TableB 2 ID / filter */
-    void setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide1, const IFCTMBIDE &remote1, uint32_t id3, uint32_t id4, const IFCTMBIDE &ide2, const IFCTMBIDE &remote2); /* TableB 4 minimum ID / filter */
-    void setFIFOFilterRange(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide1, const IFCTMBIDE &remote1, uint32_t id3, uint32_t id4, const IFCTMBIDE &ide2, const IFCTMBIDE &remote2); /* TableB dual range based IDs */
+    bool setFIFOFilter(uint8_t filter, uint32_t id1, const IFCTMBIDE &ide1, const IFCTMBIDE &remote1, uint32_t id2, const IFCTMBIDE &ide2, const IFCTMBIDE &remote2); /* TableB 2 ID / filter */
+    bool setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide1, const IFCTMBIDE &remote1, uint32_t id3, uint32_t id4, const IFCTMBIDE &ide2, const IFCTMBIDE &remote2); /* TableB 4 minimum ID / filter */
+    bool setFIFOFilterRange(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide1, const IFCTMBIDE &remote1, uint32_t id3, uint32_t id4, const IFCTMBIDE &ide2, const IFCTMBIDE &remote2); /* TableB dual range based IDs */
     void setRFFN(uint8_t rffn); /* Number Of Rx FIFO Filters (0 == 8 filters, 1 == 16 filters, etc.. */
-    void setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4 ); /* TableC 4 partial IDs per filter */
+    bool setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4 ); /* TableC 4 partial IDs per filter */
     void reset() { softResetRestore(); } /* reset flexcan controller while retaining configuration */
     void intervalTimer(bool enable = 1, uint32_t time = 150, uint8_t priority = 128);
     void teensyThread(bool enable = 1);
+    void currentMasks(); /* lists current set masks between FIFO and MBs */
+    void distribute(bool state = 1) { msg_distribution = state; }
 
   private:
     static bool can_events;
@@ -205,9 +192,13 @@ class IFCT {
     void FLEXCAN_EnterFreezeMode();
     void FLEXCAN_ExitFreezeMode();
     void setMBFilterProcessing(IFCTMBNUM mb_num, uint32_t filter_id, uint32_t calculated_mask);
-    bool filter_enhancement[16][2] = { { 0 } , { 0 } }; /* enhancement feature, first being enable bit, second being multiID or range based. */
-    uint32_t filter_enhancement_config[16][5] = { { 0 } , { 0 } }; /* storage for filter IDs */
-    bool fifo_filter_set[16] = { 0 };
+    volatile bool filter_enhancement[16][2] = { { 0 } , { 0 } }; /* enhancement feature, first being enable bit, second being multiID or range based. */
+    volatile uint32_t filter_enhancement_config[16][5] = { { 0 } , { 0 } }; /* storage for filter IDs */
+    volatile bool filter_set[16] = { 0 };
+    void packet_distribution(CAN_message_t &frame);
+    volatile uint32_t masks[16]; /* storage for masks, since we can't read/write the register if not in freeze mode */
+    uint8_t mailboxOffset();
+    bool msg_distribution = 0;
 };
 extern IFCT Can0;
 extern IFCT Can1;
