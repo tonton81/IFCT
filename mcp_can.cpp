@@ -120,6 +120,7 @@ byte MCP_CAN::readMsgBufID(unsigned long *ID, byte *len, byte buf[])
 byte MCP_CAN::readMsgBufID(byte status, volatile unsigned long *id, volatile byte *extended, volatile byte *rtrBit, volatile byte *len, volatile byte *buf)
 {
     mcp2515_read_canMsg( MCP_READ_RX0, id, extended, rtrBit, len, buf);
+return 0;
 }
 
 
@@ -156,6 +157,7 @@ void MCP_CAN::mcp2515_read_canMsg( const byte buffer_load_addr, volatile unsigne
 *********************************************************************************************************/
 byte MCP_CAN::readRxTxStatus(void)
 {
+return 0;
 }
 
 
@@ -168,6 +170,7 @@ byte MCP_CAN::readRxTxStatus(void)
 *********************************************************************************************************/
 byte MCP_CAN::checkClearRxStatus(byte *status)
 {
+return 0;
 }
 
 /*********************************************************************************************************
@@ -178,6 +181,7 @@ byte MCP_CAN::checkClearRxStatus(byte *status)
 *********************************************************************************************************/
 byte MCP_CAN::checkClearTxStatus(byte *status, byte iTxBuf)
 {
+return 0;
 }
 
 /*********************************************************************************************************
@@ -197,6 +201,7 @@ void MCP_CAN::clearBufferTransmitIfFlags(byte flags)
 *********************************************************************************************************/
 byte MCP_CAN::checkError(void)
 {
+return 0;
 }
 
 
@@ -219,7 +224,7 @@ unsigned long MCP_CAN::getCanId(void)
 *********************************************************************************************************/
 byte MCP_CAN::isRemoteRequest(void)
 {
-#undef rtr;
+#undef rtr
     return rtr;
 #define rtr flags.remote
 }
@@ -285,6 +290,7 @@ void MCP_CAN::mcp2515_start_transmit(const byte mcp_addr)              // start 
 *********************************************************************************************************/
 byte MCP_CAN::mcp2515_isTXBufFree(byte *txbuf_n, byte iBuf)           /* get Next free txbuf          */
 {
+return 0;
 }
 
 /*********************************************************************************************************
@@ -293,6 +299,7 @@ byte MCP_CAN::mcp2515_isTXBufFree(byte *txbuf_n, byte iBuf)           /* get Nex
 *********************************************************************************************************/
 byte MCP_CAN::mcp2515_getNextFreeTXBuf(byte *txbuf_n)                 // get Next free txbuf
 {
+return 0;
 }
 
 /*********************************************************************************************************
@@ -311,6 +318,7 @@ byte MCP_CAN::init_Mask(byte num, byte extended, unsigned long ulData)
 {
     filter_masks[constrain(num,0,1)] = ulData;
     mask_ext_bit[constrain(num,0,1)] = extended;
+return 1;
 }
 
 /*********************************************************************************************************
@@ -321,6 +329,7 @@ byte MCP_CAN::init_Filt(byte num, byte extended, unsigned long ulData)
 {
     filter_filters[constrain(num,0,5)] = ulData;
     filter_ext_bit[constrain(num,0,5)] = extended;
+return 1;
 }
 
 
@@ -366,6 +375,7 @@ void mcp2515_id_to_buf(const byte extended, const unsigned long id, byte *tbufda
 *********************************************************************************************************/
 byte MCP_CAN::mcp2515_init(const byte canSpeed, const byte clock)
 {
+return 0;
 }
 
 
@@ -376,7 +386,9 @@ byte MCP_CAN::mcp2515_init(const byte canSpeed, const byte clock)
 ** Descriptions:            return tx ctrl reg according to tx buffer index.
 **                          According to my tests this is faster and saves memory compared using vector
 *********************************************************************************************************/
-byte txCtrlReg(byte i) {
+byte txCtrlReg(byte i)
+{
+return 0;
 }
 
 /*********************************************************************************************************
@@ -385,6 +397,7 @@ byte txCtrlReg(byte i) {
 *********************************************************************************************************/
 byte statusToTxBuffer(byte status)
 {
+return 0;
 }
 
 /*********************************************************************************************************
@@ -393,6 +406,7 @@ byte statusToTxBuffer(byte status)
 *********************************************************************************************************/
 byte statusToTxSidh(byte status)
 {
+return 0;
 }
 
 /*********************************************************************************************************
@@ -400,6 +414,7 @@ byte statusToTxSidh(byte status)
 ** Descriptions:            return tx load command according to tx buffer sidh register
 *********************************************************************************************************/
 byte txSidhToRTS(byte sidh) {
+return 0;
 }
 
 /*********************************************************************************************************
@@ -407,6 +422,7 @@ byte txSidhToRTS(byte sidh) {
 ** Descriptions:            return tx load command according to tx buffer sidh register
 *********************************************************************************************************/
 byte txSidhToTxLoad(byte sidh) {
+return 0;
 }
 
 /*********************************************************************************************************
@@ -414,6 +430,7 @@ byte txSidhToTxLoad(byte sidh) {
 ** Descriptions:            return tx interrupt flag
 *********************************************************************************************************/
 byte txIfFlag(byte i) {
+return 0;
 }
 
 /*********************************************************************************************************
@@ -421,6 +438,7 @@ byte txIfFlag(byte i) {
 ** Descriptions:            return buffer tx pending flag on status
 *********************************************************************************************************/
 byte txStatusPendingFlag(byte i) {
+return 0;
 }
 
 /*********************************************************************************************************
@@ -437,6 +455,7 @@ void MCP_CAN::mcp2515_reset(void)
 *********************************************************************************************************/
 byte MCP_CAN::mcp2515_readRegister(const byte address)
 {
+return 0;
 }
 
 /*********************************************************************************************************
@@ -477,6 +496,7 @@ void MCP_CAN::mcp2515_modifyRegister(const byte address, const byte mask, const 
 *********************************************************************************************************/
 byte MCP_CAN::mcp2515_readStatus(void)
 {
+return 0;
 }
 
 /*********************************************************************************************************
@@ -485,6 +505,7 @@ byte MCP_CAN::mcp2515_readStatus(void)
 *********************************************************************************************************/
 byte MCP_CAN::mcp2515_setCANCTRL_Mode(const byte newmode)
 {
+return 0;
 }
 
 /*********************************************************************************************************
@@ -494,6 +515,7 @@ byte MCP_CAN::mcp2515_setCANCTRL_Mode(const byte newmode)
 byte MCP_CAN::mcp2515_configRate(const byte canSpeed, const byte clock)
 {
     Can0.setBaudRate(canSpeed);
+return 0;
 }
 
 /*********************************************************************************************************
