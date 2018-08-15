@@ -1855,6 +1855,85 @@ bool IFCT::autoBaud() {
 }
 
 
+
+
+void IFCT::acceptedIDs(const IFCTMBNUM &mb_num, bool list) {
+
+  if ( mb_num < mailboxOffset() || mb_num >= FLEXCANb_MAXMB_SIZE(_baseAddress) ) return; /* mailbox not available */
+
+  Serial.print("\nMB");
+  Serial.print(mb_num);
+  Serial.print(" accepted IDs: \t");
+
+  uint32_t shifted_mask = (FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE) ? masks[mb_num] : masks[mb_num] >> 18;
+  uint32_t canid = filter_enhancement_config[mb_num][0];
+  uint32_t min = canid >> __builtin_clz(shifted_mask) << __builtin_clz(shifted_mask);
+  uint32_t max = min + shifted_mask;
+
+  for ( uint32_t i = min, count = 0, list_count = 0; i <= max; i++ ) {
+
+    if ( ( canid & shifted_mask ) == ( i & shifted_mask ) ) {
+
+      if ( !list && list_count++ > 50 ) {
+        Serial.print("...");
+        break;
+      }
+
+
+      Serial.print("0x"); Serial.print(i, HEX);
+      if ( count++ >= 5 ) {
+        Serial.print("\n\t\t\t");
+        count = 0;
+        continue;
+      }
+      Serial.print("\t");
+    }
+  }
+  Serial.println("\n");
+
+  if ( !filter_enhancement[mb_num][0] ) Serial.println("Enhancement Disabled");
+  else Serial.println("Enhancement Enabled");
+
+  if ( filter_enhancement[mb_num][1] ) {
+    Serial.print("\t\t* Enhanced ID-range mode filtering:  0x"); /* ID range based */
+    Serial.print(filter_enhancement_config[mb_num][0],HEX);
+    Serial.print(" <--> 0x");
+    Serial.print(filter_enhancement_config[mb_num][1],HEX);
+  }
+  else {
+    Serial.print("\t\t* Enhanced Multi-ID mode filtering:  "); /* multi-id based */
+
+    std::sort(&filter_enhancement_config[mb_num][0], &filter_enhancement_config[mb_num][5]);
+
+    for ( uint8_t i = 0; i < 5; ) {
+      Serial.print("0x");
+      Serial.print(filter_enhancement_config[mb_num][i],HEX);
+      Serial.print(" ");
+      while ( (i < 4) && (filter_enhancement_config[mb_num][i] == filter_enhancement_config[mb_num][i+1]) ) {
+        i++;
+        continue;
+      }
+      i++;
+    }
+  } Serial.println("\n");
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // ################################################################################################################
 // ########################################  /* INTERVALTIMER */ ##################################################
 // ################################################################################################################
