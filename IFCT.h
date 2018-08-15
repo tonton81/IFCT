@@ -178,6 +178,7 @@ class IFCT {
     void teensyThread(bool enable = 1);
     void currentMasks(); /* lists current set masks between FIFO and MBs */
     void distribute(bool state = 1) { msg_distribution = state; }
+    void acceptedIDs(const IFCTMBNUM &mb_num, bool list = 0);
 
   private:
     static bool can_events;
@@ -192,11 +193,11 @@ class IFCT {
     void FLEXCAN_EnterFreezeMode();
     void FLEXCAN_ExitFreezeMode();
     void setMBFilterProcessing(IFCTMBNUM mb_num, uint32_t filter_id, uint32_t calculated_mask);
-    volatile bool filter_enhancement[16][2] = { { 0 } , { 0 } }; /* enhancement feature, first being enable bit, second being multiID or range based. */
-    volatile uint32_t filter_enhancement_config[16][5] = { { 0 } , { 0 } }; /* storage for filter IDs */
-    volatile bool filter_set[16] = { 0 };
+    bool filter_enhancement[16][2] = { { 0 } , { 0 } }; /* enhancement feature, first being enable bit, second being multiID or range based. */
+    uint32_t filter_enhancement_config[16][5] = { { 0 } , { 0 } }; /* storage for filter IDs */
+    bool filter_set[16] = { 0 };
     void packet_distribution(CAN_message_t &frame);
-    volatile uint32_t masks[16]; /* storage for masks, since we can't read/write the register if not in freeze mode */
+    uint32_t masks[16]; /* storage for masks, since we can't read/write the register if not in freeze mode */
     uint8_t mailboxOffset();
     bool msg_distribution = 0;
 };
