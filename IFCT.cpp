@@ -701,8 +701,7 @@ void IFCT::IFCT_message_ISR(void) {
         msg.buf[0] = dataIn >> 24; msg.buf[1] = dataIn >> 16; msg.buf[2] = dataIn >> 8; msg.buf[3] = dataIn;
         dataIn = FLEXCANb_MBn_WORD1(_baseAddress, 0);
         msg.buf[4] = dataIn >> 24; msg.buf[5] = dataIn >> 16; msg.buf[6] = dataIn >> 8; msg.buf[7] = dataIn;
-        if ( _baseAddress == FLEXCAN0_BASE ) msg.bus = 0;
-        else if ( _baseAddress == FLEXCAN1_BASE ) msg.bus = 1;
+        if ( _baseAddress == FLEXCAN1_BASE ) msg.bus = 1;
         FLEXCANb_IFLAG1(_baseAddress) = FLEXCAN_IFLAG1_BUF5I; /* clear FIFO bit only! */
 
         bool enhance_filtering_success = 0;
@@ -786,8 +785,7 @@ void IFCT::IFCT_message_ISR(void) {
           dataIn = FLEXCANb_MBn_WORD1(_baseAddress, i);
           msg.buf[4] = dataIn >> 24; msg.buf[5] = dataIn >> 16; msg.buf[6] = dataIn >> 8; msg.buf[7] = dataIn;
           msg.mb = i; /* store the mailbox the message came from (for callback reference) */
-          if ( _baseAddress == FLEXCAN0_BASE ) msg.bus = 0;
-          else if ( _baseAddress == FLEXCAN1_BASE ) msg.bus = 1;
+          if ( _baseAddress == FLEXCAN1_BASE ) msg.bus = 1;
 
           bool enhance_filtering_success = 0;
           if ( filter_enhancement[i][0] ) { /* filter enhancement (if enabled) */
