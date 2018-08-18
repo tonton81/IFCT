@@ -72,6 +72,14 @@ typedef struct CAN_message_t {
   uint8_t bus = 0;      // used to identify where the message came from when events() is used.
 } CAN_message_t;
 
+typedef struct CAN_filter_t {
+    uint32_t id;
+    struct {
+        bool extended = 0;  // identifier is extended (29-bit)
+        bool remote = 0;    // remote transmission request packet type
+        bool reserved = 0;
+    } flags;
+} CAN_filter_t;
 
 typedef enum IFCTMBNUM {
   MB0 = 0,
@@ -117,7 +125,36 @@ typedef enum IFCTFIFOTABLE {
   C = 2,
 } IFCTFIFOTABLE;
 
+typedef enum FLSIMULATE {
+  tonton81 = 0,
+  collin80 = 1,
+  teachop = 2,
+  pawelsky = 3,
+} FLSIMULATE;
+
 typedef void (*_MB_ptr)(const CAN_message_t &msg); /* mailbox / global callbacks */
+
+
+
+#define SIZE_LISTENERS 4 // used by CANListener
+
+class CANListener {
+  public:
+    CANListener ();
+
+    virtual bool frameHandler(CAN_message_t &frame, int mailbox, uint8_t controller);
+    virtual void txHandler(int mailbox, uint8_t controller);
+
+    void attachMBHandler(uint8_t mailBox);
+    void detachMBHandler(uint8_t mailBox);
+    void attachGeneralHandler(void);
+    void detachGeneralHandler(void);
+
+  private:
+    uint32_t callbacksActive; // bitfield indicating which callbacks are installed (for object oriented callbacks only)
+    friend class IFCT;     // class has to have access to the the guts of this one
+};
+
 
 
 class IFCT {
@@ -141,7 +178,7 @@ class IFCT {
     static _MB_ptr _MBhandlers[16]; /* individual mailbox handlers */
     static _MB_ptr _MBAllhandler; /* global mailbox handler */
     bool pollFIFO(CAN_message_t &msg, bool poll = 1);
-    int write(const CAN_message_t &msg, uint8_t retries = 3); /* use any available mailbox for transmitting, with optional retries */
+    int write(const CAN_message_t &msg); /* use any available mailbox for transmitting */
     int write(IFCTMBNUM mb_num, const CAN_message_t &msg); /* use a single mailbox for transmitting */
     int read(CAN_message_t &msg);
     int readMB(CAN_message_t &msg);
@@ -163,6 +200,7 @@ class IFCT {
     void enhanceFilter(IFCTMBNUM mb_num);
     uint16_t events();
     static Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> flexcan_buffer; /* create an array buffer of struct size, 16 levels deep. */
+    static Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> flexcan_library; /* create an array buffer of struct size, 16 levels deep. */
     void setFIFOFilter(const IFCTMBFLTEN &input);
     bool setFIFOFilter(uint8_t filter, uint32_t id1, const IFCTMBIDE &ide, const IFCTMBIDE &remote = NONE); /* single ID per filter */
     bool setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide, const IFCTMBIDE &remote = NONE); /* 2 ID's per filter */
@@ -179,6 +217,39 @@ class IFCT {
     void currentMasks(); /* lists current set masks between FIFO and MBs */
     void distribute(bool state = 1) { msg_distribution = state; }
     void acceptedIDs(const IFCTMBNUM &mb_num, bool list = 0);
+
+    // FLEXCAN_LIBRARY COLLIN80 COMPATIBILITY MODE
+
+    void begin(uint32_t baud = 250000, const CAN_filter_t &mask = defaultMask, uint8_t txAlt = 0, uint8_t rxAlt = 0);
+    uint8_t getNumRxBoxes();
+    uint8_t getNumMailBoxes() { return FLEXCANb_MAXMB_SIZE(_baseAddress); }
+    uint8_t getLastTxBox() { return FLEXCANb_MAXMB_SIZE(_baseAddress) -1; }
+    void setMask(uint32_t mask, uint8_t mbox);
+    void setFilter(const CAN_filter_t &filter, uint8_t mbox);
+    uint8_t setNumTxBoxes(uint8_t txboxes);
+    uint8_t getFirstTxBox();
+    uint8_t getTxBoxCount();
+    void initializeBuffers() { ; }
+    uint32_t available() { return flexcan_library.size(); }
+    bool flexcan_library_emulation = 0;
+    void flexcan_library_struct2queue(const CAN_message_t &msg);
+    void flexcan_library_queue2struct(CAN_message_t &msg);
+    int write (const CAN_message_t &msg, uint8_t mbox);
+    void setRxBufferSize(uint16_t size) { ; }
+    void setTxBufferSize(uint16_t size) { ; }
+    void setMailBoxTxBufferSize(uint8_t mbox, uint16_t size) { ; }
+    bool getFilter(CAN_filter_t &filter, uint8_t mbox);
+    void setListenOnly(bool mode);
+    void end(void) { FLEXCAN_EnterFreezeMode(); }
+    bool attachObj(CANListener *listener);
+    bool detachObj(CANListener *listener);
+    CANListener *listener[SIZE_LISTENERS];
+    void flexcan_object_oriented_callbacks(CAN_message_t &msg);
+    FLSIMULATE flexcan_library_choice = tonton81;
+    void simulate(FLSIMULATE user);
+    static CAN_filter_t defaultMask;
+    friend class FlexCAN; // allow FlexCAN class to access IFCT's private functions
+
 
   private:
     static bool can_events;
@@ -201,6 +272,32 @@ class IFCT {
     uint8_t mailboxOffset();
     bool msg_distribution = 0;
 };
+
 extern IFCT Can0;
 extern IFCT Can1;
+
+
+
+//FlexCAN class emulation using IFCT
+
+class FlexCAN {
+  private:
+    uint32_t baudRate;
+    uint8_t rxPin, txPin;
+    IFCT *controller = nullptr;
+    FLSIMULATE library = pawelsky;
+
+  public:
+    FlexCAN(uint32_t baud = 125000, uint8_t id = 0, uint8_t txAlt = 0, uint8_t rxAlt = 0);
+
+    void begin(const CAN_filter_t &mask);
+    void begin() { begin(controller->defaultMask); }
+    void setFilter(const CAN_filter_t &filter, uint8_t n);
+    void end(void) { controller->FLEXCAN_EnterFreezeMode(); }
+    int available(void);
+    int write(const CAN_message_t &msg);
+    int read(CAN_message_t &msg);
+};
+
+
 #endif
