@@ -197,7 +197,7 @@ void IFCT::enableFIFO(bool status) {
         FLEXCANb_MBn_WORD0(_baseAddress, i) = 0x00000000;
         FLEXCANb_MBn_WORD1(_baseAddress, i) = 0x00000000;
         if ( i < 4 ) FLEXCANb_MBn_CS(_baseAddress, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY);
-        else FLEXCANb_MBn_CS(_baseAddress, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY) | FLEXCAN_MB_CS_IDE | FLEXCAN_MB_CS_IDE;
+        else FLEXCANb_MBn_CS(_baseAddress, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY) | FLEXCAN_MB_CS_IDE | FLEXCAN_MB_CS_SRR;
       }
       else {
         FLEXCANb_MBn_ID(_baseAddress, i) = 0x00000000;
@@ -470,7 +470,9 @@ bool IFCT::pollFIFO(CAN_message_t &msg, bool poll) {
 }
 
 
-int IFCT::write(const CAN_message_t &msg, uint8_t retries) {
+int IFCT::write(const CAN_message_t &msg) {
+
+  uint8_t retries = 3;
 
   while ( retries ) {
     retries--;
@@ -645,11 +647,21 @@ int IFCT::readFIFO(CAN_message_t &msg) {
 
 
 int IFCT::read(CAN_message_t &msg) {
+
+  if ( flexcan_library_emulation ) {
+    if ( flexcan_library.size() ) {
+      flexcan_library_queue2struct(msg);
+      return 1;
+    }
+    return 0;
+  }
+
   bool _random = random(0, 2);
   if ( ( !_random ) && ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) &&
        !( FLEXCANb_IMASK1(_baseAddress) & FLEXCAN_IMASK1_BUF5M ) &&
        ( FLEXCANb_IFLAG1(_baseAddress) & FLEXCAN_IFLAG1_BUF5I ) ) return readFIFO(msg);
   return readMB(msg);
+
 }
 
 
@@ -715,7 +727,11 @@ void IFCT::IFCT_message_ISR(void) {
             if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(msg);
             sendMSGtoIndividualMBCallback((IFCTMBNUM)0, msg); /* send frames direct to callback (unbuffered) */
           }
-          else struct2queue(msg); /* store frame in queue ( buffered ) */
+          else {
+            if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(msg);
+            struct2queue(msg); /* store frame in queue ( buffered ) */
+            if ( flexcan_library_emulation ) flexcan_object_oriented_callbacks(msg);
+          }
         }
 
         /* callback, queue, or neither, we check other filters for cross-matches */
@@ -783,8 +799,13 @@ void IFCT::IFCT_message_ISR(void) {
             if ( !can_events ) {
               if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(msg);
               sendMSGtoIndividualMBCallback((IFCTMBNUM)i, msg); /* send frames direct to callback (unbuffered) */
+              if ( flexcan_library_emulation ) flexcan_object_oriented_callbacks(msg);
             }
-            else struct2queue(msg); /* store frame in queue ( buffered ) */
+            else {
+              if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(msg);
+              struct2queue(msg); /* store frame in queue ( buffered ) */
+              if ( flexcan_library_emulation ) flexcan_object_oriented_callbacks(msg);
+            }
           }
 
           if (!msg.flags.extended) FLEXCANb_MBn_CS(_baseAddress, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY);
@@ -819,8 +840,6 @@ void IFCT::IFCT_message_ISR(void) {
   FLEXCANb_ESR1(_baseAddress) |= FLEXCAN_ESR_ERR_INT; /* we clear the ERROR bit if we received a functional callback */
 }
 
-
-
 void IFCT::struct2queue(const CAN_message_t &msg) {
   uint8_t buf[sizeof(CAN_message_t)];
   memmove(buf, &msg, sizeof(msg));
@@ -831,7 +850,6 @@ void IFCT::queue2struct(CAN_message_t &msg) {
   flexcan_buffer.pop_front(buf, sizeof(CAN_message_t));
   memmove(&msg, buf, sizeof(msg));
 }
-
 
 
 void IFCT::mailboxStatus() {
@@ -2014,4 +2032,330 @@ void IFCT::teensyThread(bool enable) {
     else can1_thread_block = 1;
   }
 #endif
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ################################################################################################################
+// ####################  /* FLEXCAN_LIBRARY COLLIN80 COMPATIBILITY MODE */ ########################################
+// ################################################################################################################
+
+CAN_filter_t IFCT::defaultMask;
+Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexcan_library;
+
+void IFCT::begin(uint32_t baud, const CAN_filter_t &mask, uint8_t txAlt, uint8_t rxAlt) {
+  if ( flexcan_library_choice == tonton81 ) flexcan_library_choice = collin80;
+
+  setRX((IFCTALTPIN)!rxAlt); setTX((IFCTALTPIN)!rxAlt);
+
+  setBaudRate(baud);
+
+  disableFIFO();
+
+  for (uint8_t i = 0; i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++ ) { // clear all mailboxes
+    FLEXCANb_MBn_ID(_baseAddress, i) = 0x00000000;
+    FLEXCANb_MBn_WORD0(_baseAddress, i) = 0x00000000;
+    FLEXCANb_MBn_WORD1(_baseAddress, i) = 0x00000000;
+    FLEXCANb_MBn_CS(_baseAddress, i) = 0x00000000;
+  }
+
+  for (uint8_t i = FLEXCANb_MAXMB_SIZE(_baseAddress) -2; i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++ ) { // set tx mailboxes
+    FLEXCANb_MBn_ID(_baseAddress, i) = 0x00000000;
+    FLEXCANb_MBn_WORD0(_baseAddress, i) = 0x00000000;
+    FLEXCANb_MBn_WORD1(_baseAddress, i) = 0x00000000;
+    FLEXCANb_MBn_CS(_baseAddress, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_INACTIVE);
+  }
+
+  setNumTxBoxes(2);
+
+  for (uint8_t c = 0; c < getNumRxBoxes(); c++) {
+    setMask(0, c);
+    setFilter(mask, c);
+  }
+
+  flexcan_library_emulation = 1;
+
+  for (uint32_t i = 0; i < SIZE_LISTENERS; i++) listener[i] = nullptr;
+
+  FLEXCANb_IMASK1(_baseAddress) = 0xFFFF;
+}
+
+
+uint8_t IFCT::getNumRxBoxes() {
+  uint8_t count = 0;
+  for (uint8_t i = mailboxOffset(); i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++) {
+    if ( !(FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, i) >> 3)) ) count++; // if RX
+  }
+  return count;
+} 
+
+
+void IFCT::setMask(uint32_t mask, uint8_t mbox) {
+  if ( mbox >= mailboxOffset() ) {
+    FLEXCAN_EnterFreezeMode();
+    FLEXCANb_MB_MASK(_baseAddress, mbox) = mask;
+    masks[mbox] = mask;
+    FLEXCAN_ExitFreezeMode();
+  }
+}
+
+
+void IFCT::setFilter(const CAN_filter_t &filter, uint8_t mbox) {
+  if ( mbox >= mailboxOffset() ) {
+    filter_enhancement_config[mbox][0] = filter.id;
+    filter_set[mbox] = 1;
+    if (filter.flags.extended) {
+      FLEXCANb_MBn_ID(_baseAddress, mbox) = (filter.id & FLEXCAN_MB_ID_EXT_MASK);
+      FLEXCANb_MBn_CS(_baseAddress, mbox) |= FLEXCAN_MB_CS_IDE | FLEXCAN_MB_CS_SRR;
+    }
+
+    else {
+      FLEXCANb_MBn_ID(_baseAddress, mbox) = FLEXCAN_MB_ID_IDSTD(filter.id);
+      FLEXCANb_MBn_CS(_baseAddress, mbox) |= FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY);
+    }
+  }
+}
+
+
+uint8_t IFCT::setNumTxBoxes(uint8_t txboxes) {
+  uint8_t c;
+  uint32_t oldIde;
+
+  if (txboxes > getNumMailBoxes() - 1) txboxes = getNumMailBoxes() - 1;
+  if (txboxes < 1) txboxes = 1;
+
+  for (c = 0; c < getNumRxBoxes(); c++) {
+    oldIde = FLEXCANb_MBn_CS(_baseAddress, c) & FLEXCAN_MB_CS_IDE;
+    FLEXCANb_MBn_CS(_baseAddress, c) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY) | oldIde;
+  }
+
+  for (c = getFirstTxBox(); c < getNumMailBoxes(); c++) {
+    FLEXCANb_MBn_CS(_baseAddress, c) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_INACTIVE);
+  }
+
+  return getTxBoxCount();
+}
+
+
+uint8_t IFCT::getFirstTxBox() {
+  uint8_t count = 0;
+  for (uint8_t i = mailboxOffset(); i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++) {
+    if ( (FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, i) >> 3)) ) count++; // if TX
+  }
+
+  return (getNumMailBoxes() - count);
+}
+
+uint8_t IFCT::getTxBoxCount() {
+  uint8_t count = 0;
+  for (uint8_t i = mailboxOffset(); i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++) {
+    if ( (FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, i) >> 3)) ) count++; // if TX
+  }
+  return count;
+}
+
+
+void IFCT::flexcan_library_struct2queue(const CAN_message_t &msg) {
+  uint8_t buf[sizeof(CAN_message_t)];
+  memmove(buf, &msg, sizeof(msg));
+  flexcan_library.push_back(buf, sizeof(CAN_message_t));
+}
+
+
+void IFCT::flexcan_library_queue2struct(CAN_message_t &msg) {
+  uint8_t buf[sizeof(CAN_message_t)];
+  flexcan_library.pop_front(buf, sizeof(CAN_message_t));
+  memmove(&msg, buf, sizeof(msg));
+}
+
+
+int IFCT::write(const CAN_message_t &msg, uint8_t mbox) {
+  if ( mbox < mailboxOffset() || !(FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, mbox) >> 3)) ) return 0;
+  return write((IFCTMBNUM)mbox,msg);
+}
+
+
+bool IFCT::getFilter(CAN_filter_t &filter, uint8_t mbox) {
+  if ( mbox >= mailboxOffset() ) {
+
+    filter.flags.extended = FLEXCANb_MBn_CS(_baseAddress, mbox) & FLEXCAN_MB_CS_IDE;
+
+    filter.id = (FLEXCANb_MBn_ID(_baseAddress, mbox) & FLEXCAN_MB_ID_EXT_MASK);
+    if (!filter.flags.extended) filter.id >>= FLEXCAN_MB_ID_STD_BIT_NO;
+
+    filter.flags.remote = FLEXCANb_MBn_CS(_baseAddress, mbox) & FLEXCAN_MB_CS_RTR;
+    return 1;
+  }
+  return 0;
+}
+
+
+void IFCT::setListenOnly(bool mode){
+  FLEXCAN_EnterFreezeMode();
+  (mode) ? FLEXCANb_CTRL1(_baseAddress) |= FLEXCAN_CTRL_LOM : FLEXCANb_CTRL1(_baseAddress) &= ~FLEXCAN_CTRL_LOM;
+  FLEXCAN_ExitFreezeMode();
+}
+
+
+
+
+
+CANListener::CANListener() {
+  callbacksActive = 0;
+}
+
+bool CANListener::frameHandler(CAN_message_t &/*frame*/, int /*mailbox*/, uint8_t /*controller*/) {
+  return 0;
+}
+
+void CANListener::txHandler(int /*mailbox*/, uint8_t /*controller*/) {
+}
+
+void CANListener::attachMBHandler(uint8_t mailBox) {
+  if ( mailBox < 16 ) callbacksActive |= (1UL << mailBox);
+}
+
+void CANListener::detachMBHandler(uint8_t mailBox) {
+  if ( mailBox < 16 ) callbacksActive &= ~(1UL << mailBox);
+}
+
+void CANListener::attachGeneralHandler(void) {
+  callbacksActive |= (1UL << 31);
+}
+
+void CANListener::detachGeneralHandler(void) {
+  callbacksActive &= ~(1UL << 31);
+}
+
+
+bool IFCT::attachObj(CANListener *listener) {
+  for (uint32_t i = 0; i < SIZE_LISTENERS; i++) {
+    if (this->listener[i] == nullptr) {
+      this->listener[i] = listener;
+      listener->callbacksActive = 0;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool IFCT::detachObj(CANListener *listener) {
+  for (uint32_t i = 0; i < SIZE_LISTENERS; i++) {
+    if (this->listener[i] == listener) {
+      this->listener[i] = nullptr;
+      return true;
+    }
+  }
+  return false;
+}
+
+void IFCT::flexcan_object_oriented_callbacks(CAN_message_t &msg) {
+  bool handledFrame = 0;
+  uint8_t controller = 0;
+  CANListener *thisListener;
+
+  for (uint32_t listenerPos = 0; listenerPos < SIZE_LISTENERS; listenerPos++) {
+    thisListener = listener[listenerPos];
+    if (thisListener != nullptr) {
+      if (thisListener->callbacksActive & (1UL << msg.mb)) handledFrame = thisListener->frameHandler(msg, msg.mb, controller);
+      else if (thisListener->callbacksActive & (1UL << 31)) handledFrame = thisListener->frameHandler(msg, -1, controller);
+    }
+  }
+  if (handledFrame == false) flexcan_library_struct2queue(msg);
+}
+
+void IFCT::simulate(FLSIMULATE user) {
+  flexcan_library_choice = user;
+}
+
+
+
+
+
+
+
+
+
+
+// ################################################################################################################
+// ####################  /* FLEXCAN_LIBRARY PAWELSKY/TEACHOP COMPATIBILITY MODE */ ################################
+// ################################################################################################################
+
+FlexCAN::FlexCAN(uint32_t baud, uint8_t id, uint8_t txAlt, uint8_t rxAlt) {
+
+  if ( !id ) controller = &Can0;
+#ifdef __MK66FX1M0__
+  else if (id > 0) controller = &Can1;
+#endif
+
+  baudRate = baud;
+  library = pawelsky;
+
+  rxPin = rxAlt;
+  txPin = txAlt;
+}
+
+void FlexCAN::begin(const CAN_filter_t &mask) {
+
+  controller->setRX((IFCTALTPIN)!rxPin); controller->setTX((IFCTALTPIN)!rxPin);
+
+  if ( library == pawelsky || library == teachop ) controller->flexcan_library_choice = pawelsky;
+
+  controller->setBaudRate(baudRate);
+  controller->enableFIFO();
+
+  controller->FLEXCAN_EnterFreezeMode();
+  if (mask.ext) FLEXCANb_RXFGMASK(controller->_baseAddress) = ((mask.rtr?1:0) << 31) | ((mask.ext?1:0) << 30) | ((mask.id & FLEXCAN_MB_ID_EXT_MASK) << 1);
+  else FLEXCANb_RXFGMASK(controller->_baseAddress) = ((mask.rtr?1:0) << 31) | ((mask.ext?1:0) << 30) | (FLEXCAN_MB_ID_IDSTD(mask.id) << 1);
+  controller->FLEXCAN_ExitFreezeMode();
+}
+
+void FlexCAN::setFilter(const CAN_filter_t &filter, uint8_t n) {
+  if ( n < 8 ) {
+    controller->FLEXCAN_EnterFreezeMode();
+    if (filter.ext) FLEXCANb_IDFLT_TAB(controller->_baseAddress, n) = ((filter.rtr?1:0) << 31) | ((filter.ext?1:0) << 30) | ((filter.id & FLEXCAN_MB_ID_EXT_MASK) << 1);
+    else FLEXCANb_IDFLT_TAB(controller->_baseAddress, n) = ((filter.rtr?1:0) << 31) | ((filter.ext?1:0) << 30) | (FLEXCAN_MB_ID_IDSTD(filter.id) << 1);
+    controller->FLEXCAN_ExitFreezeMode();
+  }
+}
+
+
+int FlexCAN::available(void) {
+  return (FLEXCANb_IFLAG1(controller->_baseAddress) & FLEXCAN_IMASK1_BUF5M)? 1:0;
+}
+
+
+int FlexCAN::read(CAN_message_t &msg) {
+  return controller->readFIFO(msg);
+}
+
+int FlexCAN::write(const CAN_message_t &msg) {
+  return controller->write(msg);
 }
