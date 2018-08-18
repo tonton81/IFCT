@@ -463,6 +463,9 @@ bool IFCT::pollFIFO(CAN_message_t &msg, bool poll) {
       FLEXCANb_IFLAG1(_baseAddress) = FLEXCAN_IFLAG1_BUF5I; /* clear FIFO bit only! */
       if ( FLEXCANb_IFLAG1(_baseAddress) & FLEXCAN_IFLAG1_BUF6I ) FLEXCANb_IFLAG1(_baseAddress) = FLEXCAN_IFLAG1_BUF6I;
       if ( FLEXCANb_IFLAG1(_baseAddress) & FLEXCAN_IFLAG1_BUF7I ) FLEXCANb_IFLAG1(_baseAddress) = FLEXCAN_IFLAG1_BUF7I;
+      if ( _baseAddress == FLEXCAN0_BASE ) msg.bus = 0;
+      else if ( _baseAddress == FLEXCAN1_BASE ) msg.bus = 1;
+      msg.mb = 0; /* store the mailbox the message came from (for callback reference) */
       return 1;
     }
   }
@@ -555,6 +558,7 @@ rescan_rx_mbs:
     case FLEXCAN_MB_CODE_RX_FULL:           // rx full, Copy the frame to RX buffer
     case FLEXCAN_MB_CODE_RX_OVERRUN: {      // rx overrun. Incomming frame overwrote existing frame.
         FLEXCANb_MBn_CS(_baseAddress, mailbox_reader_increment) |= FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_INACTIVE); /* deactivate mailbox */
+        if ( FLEXCAN_MB_CODE_RX_OVERRUN == code ) msg.flags.overrun = 1;
         msg.len = FLEXCAN_get_length(FLEXCANb_MBn_CS(_baseAddress, mailbox_reader_increment));
         msg.flags.extended = (FLEXCANb_MBn_CS(_baseAddress, mailbox_reader_increment) & FLEXCAN_MB_CS_IDE) ? 1 : 0;
         msg.flags.remote = (FLEXCANb_MBn_CS(_baseAddress, mailbox_reader_increment) & FLEXCAN_MB_CS_RTR) ? 1 : 0;
@@ -566,6 +570,8 @@ rescan_rx_mbs:
         dataIn = FLEXCANb_MBn_WORD1(_baseAddress, mailbox_reader_increment);
         msg.buf[4] = dataIn >> 24; msg.buf[5] = dataIn >> 16; msg.buf[6] = dataIn >> 8; msg.buf[7] = dataIn;
         msg.mb = mailbox_reader_increment; /* store the mailbox the message came from (for callback reference) */
+        if ( _baseAddress == FLEXCAN0_BASE ) msg.bus = 0;
+        else if ( _baseAddress == FLEXCAN1_BASE ) msg.bus = 1;
         if (!msg.flags.extended) FLEXCANb_MBn_CS(_baseAddress, mailbox_reader_increment) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY);
         else FLEXCANb_MBn_CS(_baseAddress, mailbox_reader_increment) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY) | FLEXCAN_MB_CS_SRR | FLEXCAN_MB_CS_IDE;
         FLEXCANb_TIMER(_baseAddress); // reading timer unlocks individual mailbox
@@ -616,6 +622,9 @@ int IFCT::readFIFO(CAN_message_t &msg) {
     FLEXCANb_IFLAG1(_baseAddress) = FLEXCAN_IFLAG1_BUF5I; /* clear FIFO bit only! */
     if ( FLEXCANb_IFLAG1(_baseAddress) & FLEXCAN_IFLAG1_BUF6I ) FLEXCANb_IFLAG1(_baseAddress) = FLEXCAN_IFLAG1_BUF6I;
     if ( FLEXCANb_IFLAG1(_baseAddress) & FLEXCAN_IFLAG1_BUF7I ) FLEXCANb_IFLAG1(_baseAddress) = FLEXCAN_IFLAG1_BUF7I;
+    if ( _baseAddress == FLEXCAN0_BASE ) msg.bus = 0;
+    else if ( _baseAddress == FLEXCAN1_BASE ) msg.bus = 1;
+    msg.mb = 0; /* store the mailbox the message came from (for callback reference) */
 
     bool enhance_filtering_success = 0;
     uint8_t mailboxes = mailboxOffset();
@@ -692,6 +701,8 @@ void IFCT::IFCT_message_ISR(void) {
         msg.buf[0] = dataIn >> 24; msg.buf[1] = dataIn >> 16; msg.buf[2] = dataIn >> 8; msg.buf[3] = dataIn;
         dataIn = FLEXCANb_MBn_WORD1(_baseAddress, 0);
         msg.buf[4] = dataIn >> 24; msg.buf[5] = dataIn >> 16; msg.buf[6] = dataIn >> 8; msg.buf[7] = dataIn;
+        if ( _baseAddress == FLEXCAN0_BASE ) msg.bus = 0;
+        else if ( _baseAddress == FLEXCAN1_BASE ) msg.bus = 1;
         FLEXCANb_IFLAG1(_baseAddress) = FLEXCAN_IFLAG1_BUF5I; /* clear FIFO bit only! */
 
         bool enhance_filtering_success = 0;
@@ -763,6 +774,7 @@ void IFCT::IFCT_message_ISR(void) {
     switch ( code ) {
       case FLEXCAN_MB_CODE_RX_FULL:           // rx full, Copy the frame to RX buffer
       case FLEXCAN_MB_CODE_RX_OVERRUN: {      // rx overrun. Incomming frame overwrote existing frame.
+          if ( FLEXCAN_MB_CODE_RX_OVERRUN == code ) msg.flags.overrun = 1;
           msg.len = FLEXCAN_get_length(FLEXCANb_MBn_CS(_baseAddress, i));
           msg.flags.extended = (FLEXCANb_MBn_CS(_baseAddress, i) & FLEXCAN_MB_CS_IDE) ? 1 : 0;
           msg.flags.remote = (FLEXCANb_MBn_CS(_baseAddress, i) & FLEXCAN_MB_CS_RTR) ? 1 : 0;
