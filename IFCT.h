@@ -55,6 +55,9 @@
 #define FLEXCANb_MAXMB_SIZE(b)            (((FLEXCANb_MCR(b) & FLEXCAN_MCR_MAXMB_MASK) & 0x7F)+1)
 #define FLEXCANb_ECR(b) (*(vuint32_t*)(b+0x1C))
 
+#define FlexCAN_MAILBOX_TX_BUFFER_SUPPORT  // helper definition for handling different FlexCAN revisions
+#define FlexCAN_DYNAMIC_BUFFER_SUPPORT  // helper definition for handling different FlexCAN revisions
+
 #define FLEXCAN_BUFFER_SIZE 16
 
 typedef struct CAN_message_t {
@@ -80,6 +83,22 @@ typedef struct CAN_filter_t {
         bool reserved = 0;
     } flags;
 } CAN_filter_t;
+
+
+#define NUM_MAILBOXES   16 // used for FlexCAN_Library emulation
+typedef struct CAN_stats_t {
+    bool     enabled;           // enable collecting statistics
+    uint32_t ringRxMax;         // number of entries in the ring buffer
+    uint32_t ringRxHighWater;   // maximum entries used in the ring buffer
+    uint32_t ringRxFramesLost;  // total number of frames lost
+    uint32_t ringTxMax;         // number of entries in the ring buffer
+    uint32_t ringTxHighWater;   // maximum entries used in the ring buffer
+    struct {
+        uint32_t refCount;        // mailbox reference (use) count
+        uint32_t overrunCount;    // mailbox message overrun count
+    } mb[NUM_MAILBOXES];
+} CAN_stats_t;
+
 
 typedef enum IFCTMBNUM {
   MB0 = 0,
@@ -248,7 +267,14 @@ class IFCT {
     FLSIMULATE flexcan_library_choice = tonton81;
     void simulate(FLSIMULATE user);
     static CAN_filter_t defaultMask;
+    uint32_t rxBufferOverruns (void) { return stats.ringRxFramesLost; };
+    uint32_t freeTxBuffer(void);
     friend class FlexCAN; // allow FlexCAN class to access IFCT's private functions
+    CAN_stats_t stats;
+    void startStats (void) { stats.enabled = true; }
+    void stopStats (void) { stats.enabled = false; }
+    void clearStats(void);
+    CAN_stats_t getStats(void) { return stats; }
 
 
   private:
@@ -284,16 +310,16 @@ class FlexCAN {
   private:
     uint32_t baudRate;
     uint8_t rxPin, txPin;
-    IFCT *controller = nullptr;
+    IFCT &controller = Can0;
     FLSIMULATE library = pawelsky;
 
   public:
     FlexCAN(uint32_t baud = 125000, uint8_t id = 0, uint8_t txAlt = 0, uint8_t rxAlt = 0);
 
     void begin(const CAN_filter_t &mask);
-    void begin() { begin(controller->defaultMask); }
+    void begin() { begin(controller.defaultMask); }
     void setFilter(const CAN_filter_t &filter, uint8_t n);
-    void end(void) { controller->FLEXCAN_EnterFreezeMode(); }
+    void end(void) { controller.FLEXCAN_EnterFreezeMode(); }
     int available(void);
     int write(const CAN_message_t &msg);
     int read(CAN_message_t &msg);
