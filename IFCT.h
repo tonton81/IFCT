@@ -190,9 +190,9 @@ class IFCT {
     bool connected();
     bool setMB(const IFCTMBNUM &mb_num, const IFCTMBTXRX &mb_rx_tx, const IFCTMBIDE &ide = STD);
     void enableMBInterrupt(const IFCTMBNUM &mb_num, bool status = 1);
-    void disableMBInterrupt(const IFCTMBNUM &mb_num);
-    void onReceive(const IFCTMBNUM &mb_num, _MB_ptr handler); /* individual mailbox callback function */
-    void onReceive(_MB_ptr handler); /* global callback function */
+    void disableMBInterrupt(const IFCTMBNUM &mb_num) { enableMBInterrupt(mb_num, 0); }
+    void onReceive(const IFCTMBNUM &mb_num, _MB_ptr handler) { IFCT::_MBhandlers[mb_num] = handler; } /* individual mailbox callback function */
+    void onReceive(_MB_ptr handler) { IFCT::_MBAllhandler = handler; } /* global callback function */
     void mailboxStatus(); /* shows status of each mailbox, RX, TX, FIFO, etc... */
     static _MB_ptr _MBhandlers[16]; /* individual mailbox handlers */
     static _MB_ptr _MBAllhandler; /* global mailbox handler */
@@ -218,7 +218,8 @@ class IFCT {
     bool setMBFilterRange(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2); /* filter a range of ids */
     void enhanceFilter(IFCTMBNUM mb_num);
     uint16_t events();
-    static Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> flexcan_buffer; /* create an array buffer of struct size, 16 levels deep. */
+    static Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> flexcanRxBuffer; /* create an array buffer of struct size, 16 levels deep. */
+    static Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> flexcanTxBuffer; /* create an array buffer of struct size, 16 levels deep. */
     static Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> flexcan_library; /* create an array buffer of struct size, 16 levels deep. */
     void setFIFOFilter(const IFCTMBFLTEN &input);
     bool setFIFOFilter(uint8_t filter, uint32_t id1, const IFCTMBIDE &ide, const IFCTMBIDE &remote = NONE); /* single ID per filter */
@@ -282,6 +283,8 @@ class IFCT {
     uint8_t mailbox_reader_increment = 0;
     void struct2queue(const CAN_message_t &msg);
     void queue2struct(CAN_message_t &msg);
+    void struct2queueTx(const CAN_message_t &msg);
+    void queue2structTx(CAN_message_t &msg);
     uint32_t _baseAddress = FLEXCAN0_BASE;
     uint32_t NVIC_IRQ = 0UL;
     uint32_t currentBitrate = 0UL;
