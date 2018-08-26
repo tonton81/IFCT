@@ -80,6 +80,7 @@ IFCT::IFCT(uint32_t baud, uint32_t base) {
   FLEXCANb_MCR(_baseAddress) |= FLEXCAN_MCR_FRZ; /* enable freeze bit */
   FLEXCANb_MCR(_baseAddress) &= ~FLEXCAN_MCR_MDIS; /* enable module */
 
+
   while (FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_LPM_ACK);
   softReset(); /* reset bus */
   while (!(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FRZ_ACK));
@@ -89,8 +90,11 @@ IFCT::IFCT(uint32_t baud, uint32_t base) {
   disableFIFOInterrupt();
 
   FLEXCANb_MCR(_baseAddress) |= FLEXCAN_MCR_IRMQ; // individual mailbox masking
+  FLEXCANb_MCR(_baseAddress) |= FLEXCAN_MCR_AEN; // TX ABORT FEATURE
+  FLEXCANb_MCR(_baseAddress) |= FLEXCAN_MCR_LPRIO_EN; // TX PRIORITY FEATURE
+
   FLEXCANb_CTRL2(_baseAddress) |= FLEXCAN_CTRL2_RRS | // store remote frames
-                    FLEXCAN_CTRL2_MRP; // mailbox > FIFO priority.
+                                  FLEXCAN_CTRL2_MRP; // mailbox > FIFO priority.
 
   FLEXCANb_MCR(_baseAddress) &= ~FLEXCAN_MCR_HALT; /* start the CAN */
 
@@ -213,22 +217,12 @@ void IFCT::enableFIFO(bool status) {
 }
 
 
-void IFCT::disableFIFO() {
-  enableFIFO(0);
-}
-
-
 void IFCT::enableFIFOInterrupt(bool status) {
   if ( !(FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN) ) return; /* FIFO must be enabled first */
 
   if ( FLEXCANb_IMASK1(_baseAddress) & FLEXCAN_IFLAG1_BUF5I ) return; /* FIFO interrupts already enabled */
 
   ( !status ) ? FLEXCANb_IMASK1(_baseAddress) &= ~FLEXCAN_IMASK1_BUF5M /* disable FIFO interrupt */ : FLEXCANb_IMASK1(_baseAddress) |= FLEXCAN_IMASK1_BUF5M; /* enable FIFO interrupt */
-}
-
-
-void IFCT::disableFIFOInterrupt() {
-  enableFIFOInterrupt(0);
 }
 
 
@@ -465,31 +459,35 @@ bool IFCT::pollFIFO(CAN_message_t &msg, bool poll) {
 
 int IFCT::write(const CAN_message_t &msg) {
 
-  uint8_t retries = 3;
+  CAN_message_t sequence = msg;
 
-  while ( retries ) {
-    retries--;
-
+  if ( sequence.seq ) {
+    sequence.mb = getFirstTxBox();
+    if ( flexcanTxBuffer.size() && flexcanTxBuffer.size() != flexcanTxBuffer.capacity() ) { /* queue if buffer exists and not full */
+      NVIC_DISABLE_IRQ(NVIC_IRQ);
+      struct2queueTx(sequence);
+      NVIC_ENABLE_IRQ(NVIC_IRQ);
+      return 1;
+    }
+    if ( FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, sequence.mb)) == FLEXCAN_MB_CODE_TX_INACTIVE ) {
+      writeTxMailbox(sequence.mb, sequence);
+      return 1;
+    }
+  }
+  else {
     for (uint8_t i = mailboxOffset(); i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++) {
       if ( FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, i)) == FLEXCAN_MB_CODE_TX_INACTIVE ) {
-        FLEXCANb_IFLAG1(_baseAddress) |= (1UL << i); // 1st step clear flag in case it's set as per datasheet
-        if (msg.flags.extended) FLEXCANb_MBn_ID(_baseAddress, i) = (msg.id & FLEXCAN_MB_ID_EXT_MASK);
-        else FLEXCANb_MBn_ID(_baseAddress, i) = FLEXCAN_MB_ID_IDSTD(msg.id);
-        FLEXCANb_MBn_WORD0(_baseAddress, i) = (msg.buf[0] << 24) | (msg.buf[1] << 16) | (msg.buf[2] << 8) | msg.buf[3];
-        FLEXCANb_MBn_WORD1(_baseAddress, i) = (msg.buf[4] << 24) | (msg.buf[5] << 16) | (msg.buf[6] << 8) | msg.buf[7];
-        FLEXCANb_MBn_CS(_baseAddress, i) = (FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_ONCE) |
-                                            FLEXCAN_MB_CS_LENGTH(msg.len) |
-                                            ((msg.flags.remote) ? FLEXCAN_MB_CS_RTR : 0UL) |
-                                            ((msg.flags.extended) ? FLEXCAN_MB_CS_IDE : 0UL) |
-                                            ((msg.flags.extended) ? FLEXCAN_MB_CS_SRR : 0UL));
+        writeTxMailbox(i, msg);
         return 1; /* transmit entry accepted */
-      } // CODE CHECK
-    } // FOR LOOP
-  } // RETRY LOOP
-  if ( flexcanTxBuffer.size() < flexcanTxBuffer.capacity() ) {
-    struct2queueTx(msg);
-    return 1;
+      }
+    }
   }
+
+  if ( flexcanTxBuffer.size() < flexcanTxBuffer.capacity() ) {
+    struct2queueTx(sequence);
+    return 1; /* transmit entry accepted */
+  }
+
   return 0; /* transmit entry failed, no mailboxes available */
 }
 
@@ -501,40 +499,45 @@ void IFCT::struct2queueTx(const CAN_message_t &msg) {
 }
 void IFCT::queue2structTx(CAN_message_t &msg) {
   uint8_t buf[sizeof(CAN_message_t)];
-  flexcanTxBuffer.pop_front(buf, sizeof(CAN_message_t));
+  if ( flexcanTxBuffer.size() ) flexcanTxBuffer.pop_front(buf, sizeof(CAN_message_t));
   memmove(&msg, buf, sizeof(msg));
 }
 
 
-int IFCT::write(IFCTMBNUM mb_num, const CAN_message_t &msg) {
-
-  if ( mb_num < mailboxOffset() ) return 0; /* mailbox not available to transmit */
-  if ( !((FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, mb_num))) >> 3) ) return 0; /* not a transmit mailbox */
-
-  uint32_t timeout = millis();
-  FLEXCANb_IMASK1(_baseAddress) &= ~(1UL << mb_num); /* we disable the TX interrupt so we can use the mailbox directly (prevent ISR takeover for dequeue) */
-
-  while( FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, mb_num)) != FLEXCAN_MB_CODE_TX_INACTIVE ) {
-    if ( millis() - timeout > 100 ) {
-      FLEXCANb_IMASK1(_baseAddress) |= (1UL << mb_num); /* we restore the TX interrupt before exiting on fail */
-      return 0; /* we exit out on a timeout */
-    }
-  }
+void IFCT::writeTxMailbox(uint8_t mb_num, const CAN_message_t &msg) {
   FLEXCANb_IFLAG1(_baseAddress) |= (1UL << mb_num); // 1st step clear flag in case it's set as per datasheet
   if (msg.flags.extended) FLEXCANb_MBn_ID(_baseAddress, mb_num) = (msg.id & FLEXCAN_MB_ID_EXT_MASK);
   else FLEXCANb_MBn_ID(_baseAddress, mb_num) = FLEXCAN_MB_ID_IDSTD(msg.id);
   FLEXCANb_MBn_WORD0(_baseAddress, mb_num) = (msg.buf[0] << 24) | (msg.buf[1] << 16) | (msg.buf[2] << 8) | msg.buf[3];
   FLEXCANb_MBn_WORD1(_baseAddress, mb_num) = (msg.buf[4] << 24) | (msg.buf[5] << 16) | (msg.buf[6] << 8) | msg.buf[7];
 
-  FLEXCANb_MBn_CS(_baseAddress, mb_num) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_ONCE) |
+  FLEXCANb_MBn_CS(_baseAddress, mb_num) = (FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_ONCE) |
                                       FLEXCAN_MB_CS_LENGTH(msg.len) |
                                       ((msg.flags.remote) ? FLEXCAN_MB_CS_RTR : 0UL) |
                                       ((msg.flags.extended) ? FLEXCAN_MB_CS_IDE : 0UL) |
-                                      ((msg.flags.extended) ? FLEXCAN_MB_CS_SRR : 0UL);
+                                      ((msg.flags.extended) ? FLEXCAN_MB_CS_SRR : 0UL));
+}
+
+int IFCT::write(IFCTMBNUM mb_num, const CAN_message_t &msg) {
+
+  if ( mb_num < mailboxOffset() ) return 0; /* FIFO doesn't transmit */
+  if ( !((FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, mb_num))) >> 3) ) return 0; /* not a transmit mailbox */
+
+  FLEXCANb_IMASK1(_baseAddress) &= ~(1UL << mb_num); /* we disable the TX interrupt so we can use the mailbox directly (prevent ISR takeover for dequeue) */
+
+  uint32_t timeout = millis();
+  while ( FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, mb_num)) != FLEXCAN_MB_CODE_TX_INACTIVE ) {
+    if ( millis() - timeout > 100 ) {
+      FLEXCANb_IMASK1(_baseAddress) |= (1UL << mb_num); /* we restore the TX interrupt before exiting on fail */
+      return 0; /* we exit out on a timeout */
+    }
+  }
+
+  writeTxMailbox(mb_num,msg);
+
   FLEXCANb_IMASK1(_baseAddress) |= (1UL << mb_num); /* we restore the TX interrupt on success */
   return 1; // transmit entry accepted //
 }
-
 
 
 
@@ -694,6 +697,7 @@ void can1_message_isr (void) {
 void IFCT::IFCT_message_ISR(void) {
   CAN_message_t msg; // setup a temporary storage buffer
   uint32_t status = FLEXCANb_IFLAG1(_baseAddress);
+
   if ( (FLEXCANb_IMASK1(_baseAddress) & FLEXCAN_IMASK1_BUF5M) && (status & FLEXCAN_IFLAG1_BUF5I) && (FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN) ) { /* FIFO is enabled, capture frames if triggered */
     while ( FLEXCANb_IFLAG1(_baseAddress) & FLEXCAN_IFLAG1_BUF5I ) {
       if ( FLEXCANb_IMASK1(_baseAddress) & FLEXCAN_IMASK1_BUF5M ) {
@@ -770,7 +774,9 @@ void IFCT::IFCT_message_ISR(void) {
 
 
   /* mailbox handling routine */
+
   for (uint8_t i = mailboxOffset(); i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++) {
+
     if (!(FLEXCANb_IMASK1(_baseAddress) & ( 1UL << i ))) continue; // skip mailboxes that don't have interrupts enabled
     if (!(status & (1UL << i))) continue; // skip mailboxes that haven't triggered an interrupt
     uint32_t code = FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, i)); // Reading Control Status atomically locks mailbox.
@@ -832,27 +838,35 @@ void IFCT::IFCT_message_ISR(void) {
 
           break;
         }
-      case FLEXCAN_MB_CODE_TX_INACTIVE: {       // TX inactive. Just chillin' waiting for a message to send.
 
-          FLEXCANb_IFLAG1(_baseAddress) = (1UL << i); /* immediately flush interrupt of current mailbox */
+
+      case FLEXCAN_MB_CODE_TX_INACTIVE: {       // TX inactive. Dequeue if available
           status &= ~(1UL << i); /* remove bit from initial flag lookup so it's not set at end when another frame is captured */
-
           if ( flexcanTxBuffer.size() ) {
             CAN_message_t queueToSend;
-            queue2structTx(queueToSend);
 
-            if (queueToSend.flags.extended) FLEXCANb_MBn_ID(_baseAddress, i) = (queueToSend.id & FLEXCAN_MB_ID_EXT_MASK);
-            else FLEXCANb_MBn_ID(_baseAddress, i) = FLEXCAN_MB_ID_IDSTD(queueToSend.id);
-            FLEXCANb_MBn_WORD0(_baseAddress, i) = (queueToSend.buf[0] << 24) | (queueToSend.buf[1] << 16) | (queueToSend.buf[2] << 8) | queueToSend.buf[3];
-            FLEXCANb_MBn_WORD1(_baseAddress, i) = (queueToSend.buf[4] << 24) | (queueToSend.buf[5] << 16) | (queueToSend.buf[6] << 8) | queueToSend.buf[7];
-            FLEXCANb_MBn_CS(_baseAddress, i) = (FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_ONCE) |
-                                                FLEXCAN_MB_CS_LENGTH(queueToSend.len) |
-                                                ((queueToSend.flags.remote) ? FLEXCAN_MB_CS_RTR : 0UL) |
-                                                ((queueToSend.flags.extended) ? FLEXCAN_MB_CS_IDE : 0UL) |
-                                                ((queueToSend.flags.extended) ? FLEXCAN_MB_CS_SRR : 0UL));
+            uint8_t buf[sizeof(CAN_message_t)];
+            flexcanTxBuffer.peek_front(buf, sizeof(CAN_message_t));
+            memmove(&queueToSend, buf, sizeof(queueToSend));
+            if ( queueToSend.seq ) {
+              if ( queueToSend.mb == i ) {
+                flexcanTxBuffer.read();
+                writeTxMailbox(i,queueToSend);
+                break;
+              }
+              FLEXCANb_IFLAG1(_baseAddress) = (1UL << i); /* immediately flush interrupt of current mailbox */
+              break;
+            }
+            else {
+              queue2structTx(queueToSend);
+              writeTxMailbox(i,queueToSend);
+              break;
+            }
           }
-          continue; /* continue scan */
+          FLEXCANb_IFLAG1(_baseAddress) = (1UL << i); /* immediately flush interrupt of current mailbox */
+          break;
         }
+
       case FLEXCAN_MB_CODE_RX_BUSY:           // mailbox is busy, check it later.
       case FLEXCAN_MB_CODE_RX_INACTIVE:       // inactive Receive box. Must be a false alarm!?
       case FLEXCAN_MB_CODE_RX_EMPTY:          // rx empty already. Why did it interrupt then?
@@ -2108,20 +2122,6 @@ void IFCT::begin(uint32_t baud, const CAN_filter_t &mask, uint8_t txAlt, uint8_t
 
   disableFIFO();
 
-  for (uint8_t i = 0; i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++ ) { // clear all mailboxes
-    FLEXCANb_MBn_ID(_baseAddress, i) = 0x00000000;
-    FLEXCANb_MBn_WORD0(_baseAddress, i) = 0x00000000;
-    FLEXCANb_MBn_WORD1(_baseAddress, i) = 0x00000000;
-    FLEXCANb_MBn_CS(_baseAddress, i) = 0x00000000;
-  }
-
-  for (uint8_t i = FLEXCANb_MAXMB_SIZE(_baseAddress) -2; i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++ ) { // set tx mailboxes
-    FLEXCANb_MBn_ID(_baseAddress, i) = 0x00000000;
-    FLEXCANb_MBn_WORD0(_baseAddress, i) = 0x00000000;
-    FLEXCANb_MBn_WORD1(_baseAddress, i) = 0x00000000;
-    FLEXCANb_MBn_CS(_baseAddress, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_INACTIVE);
-  }
-
   setNumTxBoxes(2);
 
   for (uint8_t c = 0; c < getNumRxBoxes(); c++) {
@@ -2134,14 +2134,6 @@ void IFCT::begin(uint32_t baud, const CAN_filter_t &mask, uint8_t txAlt, uint8_t
   for (uint32_t i = 0; i < SIZE_LISTENERS; i++) listener[i] = nullptr;
 
   FLEXCANb_IMASK1(_baseAddress) = 0xFFFF;
-}
-
-uint32_t IFCT::freeTxBuffer(void) {
-  uint32_t count = 0;
-  for (uint8_t i = mailboxOffset(); i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++) {
-    if ( FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, i)) == FLEXCAN_MB_CODE_TX_INACTIVE ) count++; // if TX INACTIVE
-  }
-  return count;
 }
 
 
@@ -2191,31 +2183,28 @@ void IFCT::setFilter(const CAN_filter_t &filter, uint8_t mbox) {
 
 
 uint8_t IFCT::setNumTxBoxes(uint8_t txboxes) {
-  uint8_t c;
-  uint32_t oldIde;
+  if ( FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_FEN ) return getTxBoxCount(); /* no FIFO in collin80 mode, do nothing */
 
   if (txboxes > getNumMailBoxes() - 1) txboxes = getNumMailBoxes() - 1;
   if (txboxes < 1) txboxes = 1;
 
-  for (c = 0; c < getNumRxBoxes(); c++) {
-    oldIde = FLEXCANb_MBn_CS(_baseAddress, c) & FLEXCAN_MB_CS_IDE;
+  for (uint8_t c = 0; c < getNumMailBoxes() - txboxes; c++) {
+    uint32_t oldIde = FLEXCANb_MBn_CS(_baseAddress, c) & 0xF0FFFFFF; /* store everything except code area */
     FLEXCANb_MBn_CS(_baseAddress, c) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY) | oldIde;
   }
 
-  for (c = getFirstTxBox(); c < getNumMailBoxes(); c++) {
-    FLEXCANb_MBn_CS(_baseAddress, c) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_TX_INACTIVE);
-  }
+  for (uint8_t c = getNumMailBoxes() - txboxes; c < getNumMailBoxes(); c++) setMB((IFCTMBNUM)c,TX);
 
   return getTxBoxCount();
 }
 
 
-uint8_t IFCT::getFirstTxBox() {
+int IFCT::getFirstTxBox() {
   uint8_t count = 0;
   for (uint8_t i = mailboxOffset(); i < FLEXCANb_MAXMB_SIZE(_baseAddress); i++) {
     if ( (FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, i)) >> 3) ) count++; // if TX
   }
-
+  if ( !count ) return -1;
   return (getNumMailBoxes() - count);
 }
 
@@ -2273,33 +2262,6 @@ void IFCT::setListenOnly(bool mode){
 
 
 
-CANListener::CANListener() {
-  callbacksActive = 0;
-}
-
-bool CANListener::frameHandler(CAN_message_t &/*frame*/, int /*mailbox*/, uint8_t /*controller*/) {
-  return 0;
-}
-
-void CANListener::txHandler(int /*mailbox*/, uint8_t /*controller*/) {
-}
-
-void CANListener::attachMBHandler(uint8_t mailBox) {
-  if ( mailBox < 16 ) callbacksActive |= (1UL << mailBox);
-}
-
-void CANListener::detachMBHandler(uint8_t mailBox) {
-  if ( mailBox < 16 ) callbacksActive &= ~(1UL << mailBox);
-}
-
-void CANListener::attachGeneralHandler(void) {
-  callbacksActive |= (1UL << 31);
-}
-
-void CANListener::detachGeneralHandler(void) {
-  callbacksActive &= ~(1UL << 31);
-}
-
 
 bool IFCT::attachObj(CANListener *listener) {
   for (uint32_t i = 0; i < SIZE_LISTENERS; i++) {
@@ -2335,11 +2297,6 @@ void IFCT::flexcan_object_oriented_callbacks(CAN_message_t &msg) {
   }
   if (handledFrame == false) flexcan_library_struct2queue(msg);
 }
-
-void IFCT::simulate(FLSIMULATE user) {
-  flexcan_library_choice = user;
-}
-
 
 
 
@@ -2389,17 +2346,4 @@ void FlexCAN::setFilter(const CAN_filter_t &filter, uint8_t n) {
     else FLEXCANb_IDFLT_TAB(controller._baseAddress, n) = ((filter.rtr?1:0) << 31) | ((filter.ext?1:0) << 30) | (FLEXCAN_MB_ID_IDSTD(filter.id) << 1);
     controller.FLEXCAN_ExitFreezeMode();
   }
-}
-
-
-int FlexCAN::available(void) {
-  return (FLEXCANb_IFLAG1(controller._baseAddress) & FLEXCAN_IMASK1_BUF5M)? 1:0;
-}
-
-int FlexCAN::read(CAN_message_t &msg) {
-  return controller.readFIFO(msg);
-}
-
-int FlexCAN::write(const CAN_message_t &msg) {
-  return controller.write(msg);
 }
