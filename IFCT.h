@@ -55,10 +55,7 @@
 #define FLEXCANb_MAXMB_SIZE(b)            (((FLEXCANb_MCR(b) & FLEXCAN_MCR_MAXMB_MASK) & 0x7F)+1)
 #define FLEXCANb_ECR(b) (*(vuint32_t*)(b+0x1C))
 
-#define FlexCAN_MAILBOX_TX_BUFFER_SUPPORT  // helper definition for handling different FlexCAN revisions
-#define FlexCAN_DYNAMIC_BUFFER_SUPPORT  // helper definition for handling different FlexCAN revisions
-
-#define FLEXCAN_BUFFER_SIZE 16
+#define FLEXCAN_BUFFER_SIZE 64
 
 typedef struct CAN_message_t {
   uint32_t id = 0;          // can identifier
@@ -73,6 +70,7 @@ typedef struct CAN_message_t {
   uint8_t buf[8] = { 0 };       // data
   uint8_t mb = 0;       // used to identify mailbox reception
   uint8_t bus = 0;      // used to identify where the message came from when events() is used.
+  bool seq = 0;         // sequential frames
 } CAN_message_t;
 
 typedef struct CAN_filter_t {
@@ -159,15 +157,15 @@ typedef void (*_MB_ptr)(const CAN_message_t &msg); /* mailbox / global callbacks
 
 class CANListener {
   public:
-    CANListener ();
+    CANListener () { callbacksActive = 0; }
 
-    virtual bool frameHandler(CAN_message_t &frame, int mailbox, uint8_t controller);
-    virtual void txHandler(int mailbox, uint8_t controller);
+    virtual bool frameHandler(CAN_message_t &frame, int mailbox, uint8_t controller) { return 0; }
+    virtual void txHandler(int mailbox, uint8_t controller) { ; }
 
-    void attachMBHandler(uint8_t mailBox);
-    void detachMBHandler(uint8_t mailBox);
-    void attachGeneralHandler(void);
-    void detachGeneralHandler(void);
+    void attachMBHandler(uint8_t mailBox) { if ( mailBox < 16 ) callbacksActive |= (1UL << mailBox); }
+    void detachMBHandler(uint8_t mailBox) { if ( mailBox < 16 ) callbacksActive &= ~(1UL << mailBox); }
+    void attachGeneralHandler(void) { callbacksActive |= (1UL << 31); }
+    void detachGeneralHandler(void) { callbacksActive &= ~(1UL << 31); }
 
   private:
     uint32_t callbacksActive; // bitfield indicating which callbacks are installed (for object oriented callbacks only)
@@ -181,9 +179,9 @@ class IFCT {
   public:
     IFCT(uint32_t baud = 1000000, uint32_t base = FLEXCAN0_BASE);
     void enableFIFOInterrupt(bool status = 1);
-    void disableFIFOInterrupt();
+    void disableFIFOInterrupt() { enableFIFOInterrupt(0); }
     void enableFIFO(bool status = 1);
-    void disableFIFO();
+    void disableFIFO() { enableFIFO(0); }
     void setBaudRate(uint32_t baud = 1000000);
     uint32_t getBaudRate() { return currentBitrate; }
     bool autoBaud();
@@ -247,7 +245,7 @@ class IFCT {
     void setMask(uint32_t mask, uint8_t mbox);
     void setFilter(const CAN_filter_t &filter, uint8_t mbox);
     uint8_t setNumTxBoxes(uint8_t txboxes);
-    uint8_t getFirstTxBox();
+    int getFirstTxBox();
     uint8_t getTxBoxCount();
     void initializeBuffers() { ; }
     uint32_t available() { return flexcan_library.size(); }
@@ -266,10 +264,10 @@ class IFCT {
     CANListener *listener[SIZE_LISTENERS];
     void flexcan_object_oriented_callbacks(CAN_message_t &msg);
     FLSIMULATE flexcan_library_choice = tonton81;
-    void simulate(FLSIMULATE user);
+    void simulate(FLSIMULATE user) { flexcan_library_choice = user; }
     static CAN_filter_t defaultMask;
     uint32_t rxBufferOverruns (void) { return stats.ringRxFramesLost; };
-    uint32_t freeTxBuffer(void);
+    uint32_t freeTxBuffer(void) { return flexcanTxBuffer.capacity(); }
     friend class FlexCAN; // allow FlexCAN class to access IFCT's private functions
     CAN_stats_t stats;
     void startStats (void) { stats.enabled = true; }
@@ -300,6 +298,8 @@ class IFCT {
     uint32_t masks[16]; /* storage for masks, since we can't read/write the register if not in freeze mode */
     uint8_t mailboxOffset();
     bool msg_distribution = 0;
+    void writeTxMailbox(uint8_t mb_num, const CAN_message_t &msg);
+
 };
 
 extern IFCT Can0;
@@ -323,9 +323,9 @@ class FlexCAN {
     void begin() { begin(controller.defaultMask); }
     void setFilter(const CAN_filter_t &filter, uint8_t n);
     void end(void) { controller.FLEXCAN_EnterFreezeMode(); }
-    int available(void);
-    int write(const CAN_message_t &msg);
-    int read(CAN_message_t &msg);
+    int available(void) { return (FLEXCANb_IFLAG1(controller._baseAddress) & FLEXCAN_IMASK1_BUF5M)? 1:0; }
+    int write(const CAN_message_t &msg) { return controller.write(msg); }
+    int read(CAN_message_t &msg) { return controller.readFIFO(msg); }
 };
 
 
