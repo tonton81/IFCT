@@ -53,6 +53,7 @@ class Circular_Buffer {
         T peekBytes(T *buffer, uint16_t length);
         T read();
         T pop_front(T *buffer, uint16_t length) { return readBytes(buffer,length); }
+        T peek_front(T *buffer, uint16_t length);
         T read(T *buffer, uint16_t length) { return readBytes(buffer,length); }
         T readBytes(T *buffer, uint16_t length);
         void flush() { clear(); }
@@ -83,6 +84,7 @@ class Circular_Buffer {
         T* front() { return _cabuf[((head)&(_size-1))]+2; }
         T* back() { return _cabuf[((tail-1)&(_size-1))]+2; }
         bool replace(T *buffer, uint16_t length, int pos1, int pos2, int pos3, int pos4 = -1, int pos5 = -1);
+        bool isEqual(const T *buffer);
         T* find(int pos1, int pos2, int pos3, int pos4 = -1, int pos5 = -1);
 
     protected:
@@ -96,6 +98,7 @@ class Circular_Buffer {
         T _cabuf[_size][multi+2];
         void _init();
 };
+
 
 template<typename T, uint16_t _size, uint16_t multi>
 bool Circular_Buffer<T,_size,multi>::remove(uint16_t pos) {
@@ -186,6 +189,35 @@ bool Circular_Buffer<T, _size, multi>::replace(T *buffer, uint16_t length, int p
   return found;
 }
 
+
+
+
+
+
+
+template<typename T, uint16_t _size, uint16_t multi>
+bool Circular_Buffer<T,_size,multi>::isEqual(const T *buffer) {
+  if ( multi ) {
+    bool success = 1;
+    for ( uint16_t j = 0; j < _available; j++ ) {
+      success = 1;
+      for ( uint16_t k = 0; k < (_cabuf[ ((head+j)&(_size-1)) ][0] | _cabuf[ ((head+j)&(_size-1)) ][1]); k++ ) {
+        if ( _cabuf[ ((head+j)&(_size-1)) ][k+2] != buffer[k] ) {
+          success = 0;
+          break;
+        }
+      }
+      if ( success ) return 1;
+    }
+  }
+  return 0;
+}
+
+
+
+
+
+
 template<typename T, uint16_t _size, uint16_t multi>
 void Circular_Buffer<T,_size,multi>::print(const char *p) {
   if ( multi ) return;
@@ -201,8 +233,8 @@ void Circular_Buffer<T,_size,multi>::println(const char *p) {
 
 template<typename T, uint16_t _size, uint16_t multi>
 void Circular_Buffer<T,_size,multi>::_init() {
-  for ( uint16_t i = 0; i < _size; i++ ) _cbuf[i] = i;
-  init_ca = 0;
+//  for ( uint16_t i = 0; i < _size; i++ ) _cbuf[i] = i;
+//  init_ca = 0;
 }
 
 template<typename T, uint16_t _size, uint16_t multi>
@@ -457,6 +489,17 @@ T Circular_Buffer<T,_size,multi>::peekBytes(T *buffer, uint16_t length) {
   else for ( uint16_t i = 0; i < _count; i++ ) buffer[i] = peek(i);
   return _count;
 }
+
+
+template<typename T, uint16_t _size, uint16_t multi>
+T Circular_Buffer<T,_size,multi>::peek_front(T *buffer, uint16_t length) {
+  if ( multi ) {
+    if ( init_ca ) _init();
+    memmove(&buffer[0],&_cabuf[((head)&(_size-1))][2],length*sizeof(T)); // update CA buffer
+    return 0;
+  }
+}
+
 
 template<typename T, uint16_t _size, uint16_t multi>
 T Circular_Buffer<T,_size,multi>::readBytes(T *buffer, uint16_t length) {
