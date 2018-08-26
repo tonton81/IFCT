@@ -55,7 +55,7 @@
 #define FLEXCANb_MAXMB_SIZE(b)            (((FLEXCANb_MCR(b) & FLEXCAN_MCR_MAXMB_MASK) & 0x7F)+1)
 #define FLEXCANb_ECR(b) (*(vuint32_t*)(b+0x1C))
 
-#define FLEXCAN_BUFFER_SIZE 64
+#define FLEXCAN_BUFFER_SIZE 16
 
 typedef struct CAN_message_t {
   uint32_t id = 0;          // can identifier
