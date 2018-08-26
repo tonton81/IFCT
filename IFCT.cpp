@@ -1082,6 +1082,7 @@ void IFCT::setMBFilter(IFCTMBFLTEN input) {
     filter_set[i] = 0; /* reset enhancement filters bit set */
     if ( input == ACCEPT_ALL ) FLEXCANb_MB_MASK(_baseAddress, i) = 0x00000000; // (RXIMR)
     if ( input == REJECT_ALL ) FLEXCANb_MB_MASK(_baseAddress, i) = 0xFFFFFFFF; // (RXIMR)
+    masks[i] = FLEXCANb_MB_MASK(_baseAddress, i);
     FLEXCANb_MBn_ID(_baseAddress, i) = 0x00000000;
   }
   FLEXCAN_ExitFreezeMode();
@@ -1425,7 +1426,7 @@ bool IFCT::setFIFOFilter(uint8_t filter, uint32_t id1, const IFCTMBIDE &ide1, co
   for ( uint8_t i = 0; i < mailboxOffset(); i++ ) filter_enhancement[i][0] = 0; /* disable FIFO enhancement */
   filter_enhancement[filter][1] = 0; /* set it as multi id based */
   filter_enhancement_config[filter][0] = id1;
-  filter_enhancement_config[filter][1] = id2;
+  filter_enhancement_config[filter][1] = id1;
   filter_enhancement_config[filter][2] = id2;
   filter_enhancement_config[filter][3] = id2;
   filter_enhancement_config[filter][4] = id2;
@@ -1839,13 +1840,13 @@ void IFCT::currentMasks() {
           continue;
         }
         Serial.print(" [Table C]\n\t\t\t * User Mask 1: 0x");
-        Serial.print((masks[i] >> 0)&0xFF000000,HEX);
+        Serial.print((masks[i])&0xFF000000,HEX);
         Serial.print("\n\t\t\t * User Mask 2: 0x");
-        Serial.print((masks[i] >> 0)&0x00FF0000,HEX);
+        Serial.print((masks[i])&0x00FF0000,HEX);
         Serial.print("\n\t\t\t * User Mask 3: 0x");
-        Serial.print((masks[i] >> 0)&0x0000FF00,HEX);
+        Serial.print((masks[i])&0x0000FF00,HEX);
         Serial.print("\n\t\t\t * User Mask 4: 0x");
-        Serial.println((masks[i] >> 0)&0x000000FF,HEX);
+        Serial.println((masks[i])&0x000000FF,HEX);
       }
     }
 
@@ -1919,27 +1920,290 @@ bool IFCT::autoBaud() {
 
 void IFCT::acceptedIDs(const IFCTMBNUM &mb_num, bool list) {
 
-  if ( mb_num < mailboxOffset() || mb_num >= FLEXCANb_MAXMB_SIZE(_baseAddress) ) return; /* mailbox not available */
+  if ( mb_num < mailboxOffset() ) return; /* mailbox not available */
 
-  Serial.print("\nMB");
+  if ( mb_num == FIFO ) {
+
+    if ( ((FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_IDAM_MASK) >> FLEXCAN_MCR_IDAM_BIT_NO) == 0 ) { /* Table A */
+      Serial.print("\nFIFO Table A: \n");
+      Serial.print("\tSpecifies an ID to be used as acceptance criteria for the FIFO. In the standard frame\n");
+      Serial.print("\tformat, only the 11 most significant bits (29 to 19) are used for frame identification. In\n");
+      Serial.print("\tthe extended frame format, all bits are used.\n");
+    } // TABLE_A
+
+    else if ( ((FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_IDAM_MASK) >> FLEXCAN_MCR_IDAM_BIT_NO) == 1 ) { /* Table B */
+      Serial.print("\nFIFO Table B: \n");
+      Serial.print("\tSpecifies an ID to be used as acceptance criteria for the FIFO. In the standard frame\n");
+      Serial.print("\tformat, the 11 most significant bits (a full standard ID) (29 to 19 and 13 to 3) are used for\n");
+      Serial.print("\tframe identification. In the extended frame format, all 14 bits of the field are compared to\n");
+      Serial.print("\tthe 14 most significant bits of the received ID.\n");
+    } // TABLE_B
+
+    else if ( ((FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_IDAM_MASK) >> FLEXCAN_MCR_IDAM_BIT_NO) == 2 ) { /* Table C */
+      Serial.print("\nFIFO Table C: \n");
+      Serial.print("\tSpecifies an ID to be used as acceptance criteria for the FIFO. In both standard and\n");
+      Serial.print("\textended frame formats, all 8 bits of the field are compared to the 8 most significant bits\n");
+      Serial.print("\tof the received ID.\n");
+    }  // TABLE_C
+
+
+
+    for ( uint8_t filter = 0; filter < mailboxOffset(); filter++ ) {
+
+      ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+      ///////////////////////////////           TABLE A          /////////////////////////////////////////////////////////////
+      ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+      if ( ((FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_IDAM_MASK) >> FLEXCAN_MCR_IDAM_BIT_NO) == 0 ) { /* Table A */
+
+        Serial.print("\n  *** Filter[");
+        Serial.print(filter);
+        Serial.print("] accepted IDs: \n\t\t");
+
+        if ( !filter_set[filter] ) {
+          Serial.print("FILTER NOT SET! Currently set to ");
+          if ( !masks[filter] ) Serial.print("accept all traffic\n\n");
+          else if ( masks[filter] == 0xFFFFFFFF ) Serial.print("reject all traffic\n\n");
+          continue;
+        }
+
+        uint32_t shifted_mask = (FLEXCANb_IDFLT_TAB(_baseAddress, filter) & (1UL << 30)) ? (masks[filter] >> 1) & 0x1FFFFFFF : (masks[filter] >> 19) & 0x7FF;
+        uint32_t canid = filter_enhancement_config[filter][0];
+        uint32_t min = ( canid > 0x7FF ) ? canid >> __builtin_clz(shifted_mask) << __builtin_clz(shifted_mask) : canid & (~(shifted_mask) & 0x7FF);
+        uint32_t max = ( canid > 0x7FF ) ? canid | (~(shifted_mask) & 0x1FFFFFFF) : canid | (~(shifted_mask) & 0x7FF);
+
+        Serial.print("\tmin search: 0x"); Serial.print(min, HEX);
+        Serial.print("\t\t"); Serial.print("max search: 0x");
+        Serial.print(max, HEX); Serial.print("\n\n\t\t\t");
+
+        for ( uint32_t i = min, count = 0, list_count = 0; i <= max; i++ ) {
+          if ( ( canid & shifted_mask ) == ( i & shifted_mask ) ) {
+            if ( !list && list_count++ > 50 ) {
+              Serial.print("...");
+              break;
+            }
+            Serial.print("0x"); Serial.print(i, HEX);
+            if ( count++ >= 5 ) {
+              Serial.print("\n\t\t\t");
+              count = 0;
+              continue;
+            }
+            Serial.print("\t");
+          }
+        }
+        Serial.println("\n");
+
+        if ( !filter_enhancement[filter][0] ) Serial.println("\tEnhancement Disabled");
+        else Serial.println("\tEnhancement Enabled");
+
+        if ( filter_enhancement[filter][1] ) {
+          Serial.print("\t\t* Enhanced ID-range mode filtering:  0x"); /* ID range based */
+          Serial.print(filter_enhancement_config[filter][0], HEX);
+          Serial.print(" <--> 0x");
+          Serial.print(filter_enhancement_config[filter][1], HEX);
+        }
+        else {
+          Serial.print("\t\t* Enhanced Multi-ID mode filtering:  "); /* multi-id based */
+          std::sort(&filter_enhancement_config[filter][0], &filter_enhancement_config[filter][5]);
+          for ( uint8_t i = 0; i < 5; ) {
+            Serial.print("0x");
+            Serial.print(filter_enhancement_config[filter][i], HEX);
+            Serial.print(" ");
+            while ( (i < 4) && (filter_enhancement_config[filter][i] == filter_enhancement_config[filter][i + 1]) ) {
+              i++;
+              continue;
+            }
+            i++;
+          }
+        } Serial.println("\n");
+
+
+      } // TABLE_A
+      ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+      ///////////////////////////////           TABLE B          /////////////////////////////////////////////////////////////
+      ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+      else if ( ((FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_IDAM_MASK) >> FLEXCAN_MCR_IDAM_BIT_NO) == 1 ) { /* Table B */
+
+        Serial.print("\n  *** Filter[");
+        Serial.print(filter);
+        Serial.print("] accepted IDs: \n\t\t");
+
+        if ( !filter_set[filter] ) {
+          Serial.print("FILTER NOT SET! Currently set to ");
+          if ( !masks[filter] ) Serial.print("accept all traffic\n\n");
+          else if ( masks[filter] == 0x3FFF3FFF ) Serial.print("reject all traffic\n\n");
+          continue;
+        }
+
+        uint32_t shifted_mask = (FLEXCANb_IDFLT_TAB(_baseAddress, filter) & (1UL << 30)) ? ((masks[filter] >> 16) & 0x3FFF) << (29 - 14) : (masks[filter] >> 19) & 0x7FF;
+        uint32_t canid = filter_enhancement_config[filter][0];
+        uint32_t min = ( canid > 0x7FF ) ? canid >> __builtin_clz(shifted_mask) << __builtin_clz(shifted_mask) : canid & (~(shifted_mask) & 0x7FF);
+        uint32_t max = ( canid > 0x7FF ) ? canid | (~(shifted_mask) & 0x3FFF) : canid | (~(shifted_mask) & 0x7FF);
+
+        Serial.print("\tmin search: 0x"); Serial.print(min, HEX);
+        Serial.print("\t\t"); Serial.print("max search: 0x");
+        Serial.print(max, HEX); Serial.print("\n\n\t\t\t");
+
+        for ( uint32_t i = min, count = 0, list_count = 0; i <= max; i++ ) {
+          if ( ( canid & shifted_mask ) == ( i & shifted_mask ) ) {
+            if ( !list && list_count++ > 50 ) {
+              Serial.print("...");
+              break;
+            }
+            Serial.print("0x"); Serial.print(i, HEX);
+            if ( count++ >= 5 ) {
+              Serial.print("\n\t\t\t");
+              count = 0;
+              continue;
+            }
+            Serial.print("\t");
+          }
+        }
+        Serial.println("\n");
+
+        if ( !filter_enhancement[filter][0] ) Serial.println("\tEnhancement Disabled");
+        else Serial.println("\tEnhancement Enabled");
+
+        if ( filter_enhancement[filter][1] ) {
+          Serial.print("\t\t* Enhanced ID-range mode filtering:  0x"); /* ID range based */
+          Serial.print(filter_enhancement_config[filter][0], HEX);
+          Serial.print(" <--> 0x");
+          Serial.print(filter_enhancement_config[filter][1], HEX);
+        }
+        else {
+          Serial.print("\t\t* Enhanced Multi-ID mode filtering:  "); /* multi-id based */
+          Serial.print("0x");
+          Serial.print(filter_enhancement_config[filter][0], HEX);
+          if ( filter_enhancement_config[filter][0] != filter_enhancement_config[filter][1] ) {
+            Serial.print(" 0x");
+            Serial.print(filter_enhancement_config[filter][1], HEX);
+          }
+        } Serial.println("\n");
+
+
+
+        shifted_mask = (FLEXCANb_IDFLT_TAB(_baseAddress, filter) & (1UL << 14)) ? ((masks[filter] >> 0) & 0x3FFF) << (29 - 14) : (masks[filter] >> 3) & 0x7FF;
+        canid = filter_enhancement_config[filter][2];
+        min = ( canid > 0x7FF ) ? canid >> __builtin_clz(shifted_mask) << __builtin_clz(shifted_mask) : canid & (~(shifted_mask) & 0x7FF);
+        max = ( canid > 0x7FF ) ? canid | (~(shifted_mask) & 0x3FFF) : canid | (~(shifted_mask) & 0x7FF);
+
+        Serial.print("\t\t\tmin search: 0x"); Serial.print(min, HEX);
+        Serial.print("\t\t"); Serial.print("max search: 0x");
+        Serial.print(max, HEX); Serial.print("\n\n\t\t\t");
+
+        for ( uint32_t i = min, count = 0, list_count = 0; i <= max; i++ ) {
+          if ( ( canid & shifted_mask ) == ( i & shifted_mask ) ) {
+            if ( !list && list_count++ > 50 ) {
+              Serial.print("...");
+              break;
+            }
+            Serial.print("0x"); Serial.print(i, HEX);
+            if ( count++ >= 5 ) {
+              Serial.print("\n\t\t\t");
+              count = 0;
+              continue;
+            }
+            Serial.print("\t");
+          }
+        }
+        Serial.println("\n");
+
+        if ( !filter_enhancement[filter][0] ) Serial.println("\tEnhancement Disabled");
+        else Serial.println("\tEnhancement Enabled");
+
+        if ( filter_enhancement[filter][1] ) {
+          Serial.print("\t\t* Enhanced ID-range mode filtering:  0x"); /* ID range based */
+          Serial.print(filter_enhancement_config[filter][2], HEX);
+          Serial.print(" <--> 0x");
+          Serial.print(filter_enhancement_config[filter][3], HEX);
+        }
+        else {
+          Serial.print("\t\t* Enhanced Multi-ID mode filtering:  "); /* multi-id based */
+          Serial.print("0x");
+          Serial.print(filter_enhancement_config[filter][2], HEX);
+          if ( filter_enhancement_config[filter][2] != filter_enhancement_config[filter][3] ) {
+            Serial.print(" 0x");
+            Serial.print(filter_enhancement_config[filter][3], HEX);
+          }
+        } Serial.println("\n");
+      } // TABLE_B
+      ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+      ///////////////////////////////           TABLE C          /////////////////////////////////////////////////////////////
+      ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+      else if ( ((FLEXCANb_MCR(_baseAddress) & FLEXCAN_MCR_IDAM_MASK) >> FLEXCAN_MCR_IDAM_BIT_NO) == 2 ) { /* Table C */
+
+        Serial.print("\n  *** Filter[");
+        Serial.print(filter);
+        Serial.print("] accepted IDs: \n\t\t");
+
+        if ( !filter_set[filter] ) {
+          Serial.print("FILTER NOT SET! Currently set to ");
+          if ( !masks[filter] ) Serial.print("accept all traffic\n\n");
+          else if ( masks[filter] == 0xFFFFFFFF ) Serial.print("reject all traffic\n\n");
+          continue;
+        }
+
+        uint32_t shifted_mask[4] = { (masks[filter])&0xFF000000, (masks[filter])&0x00FF0000, (masks[filter])&0x0000FF00, (masks[filter])&0x000000FF };
+        uint32_t canid[4] = { filter_enhancement_config[filter][0], filter_enhancement_config[filter][1], filter_enhancement_config[filter][2], filter_enhancement_config[filter][3] };
+        for ( uint8_t i = 0; i < 4; i++ ) {
+          if ( __builtin_clz(canid[i]) <= 24 ) {
+            uint8_t len = (24-__builtin_clz(canid[i]));
+            canid[i] >>= len;
+            //canid[i] <<= len;
+          }
+        }
+
+        Serial.print("Due to the broad range of IDs, a table will not be provided.\n\t\tFilter contains these IDs:\n\t\t");
+        for ( uint8_t i = 0; i < 4; i++ ) {
+           Serial.print("0x"); Serial.print(filter_enhancement_config[filter][i],HEX); Serial.print(" ");
+        } Serial.print("\n\t\tThe 8 most significant bits of each:\n\t\t");
+        for ( uint8_t i = 0; i < 4; i++ ) {
+           Serial.print("0x"); Serial.print(canid[i],HEX); Serial.print(" ");
+        } Serial.println();
+      } // TABLE_C
+    } // FOR_LOOP
+    return; // EXIT FIFO CALL
+  }
+      ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+      ///////////////////////////////           MAILBOX AREA          ////////////////////////////////////////////////////////
+      ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+  Serial.print("\nMailbox: "); Serial.println(mb_num);
+  Serial.print("\tIn standard frame format, only the 11 most significant bits (28 to 18) are used for frame\n");
+  Serial.print("\tidentification in both receive and transmit cases. The 18 least significant bits are ignored.\n");
+  Serial.print("\tIn extended frame format, all bits are used for frame identification in both receive and\n");
+  Serial.print("\ttransmit cases.\n");
+
+  Serial.print("\n  *** MB");
   Serial.print(mb_num);
-  Serial.print(" accepted IDs: \t");
+  if ( (FLEXCAN_get_code(FLEXCANb_MBn_CS(_baseAddress, mb_num)) >> 3) ) {
+    Serial.println(" is a transmission mailbox.\n");
+    return;
+  }
+  Serial.print(" accepted IDs: \n\t\t");
 
-  uint32_t shifted_mask = (FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE) ? masks[mb_num] : masks[mb_num] >> 18;
+
+  if ( !filter_set[mb_num] ) {
+    Serial.print("FILTER NOT SET! Currently set to ");
+    if ( !masks[mb_num] ) Serial.print("accept all traffic\n\n");
+    else if ( masks[mb_num] == 0xFFFFFFFF ) Serial.print("reject all traffic\n\n");
+    return;
+  }
+
+  uint32_t shifted_mask = (FLEXCANb_MBn_CS(_baseAddress, mb_num) & FLEXCAN_MB_CS_IDE) ? ((masks[mb_num] >> 0) << 11) & 0x1FFFFFFF : (masks[mb_num] >> 18) & 0x7FF;
   uint32_t canid = filter_enhancement_config[mb_num][0];
-  uint32_t min = canid >> __builtin_clz(shifted_mask) << __builtin_clz(shifted_mask);
-  uint32_t max = min + shifted_mask;
+  uint32_t min = ( canid > 0x7FF ) ? canid >> __builtin_clz(shifted_mask) << __builtin_clz(shifted_mask) : canid & (~(shifted_mask) & 0x7FF);
+  uint32_t max = ( canid > 0x7FF ) ? canid | (~(shifted_mask) & 0x3FFF) : canid | (~(shifted_mask) & 0x7FF);
+
+  Serial.print("\tmin search: 0x"); Serial.print(min, HEX);
+  Serial.print("\t\t"); Serial.print("max search: 0x");
+  Serial.print(max, HEX); Serial.print("\n\n\t\t\t");
 
   for ( uint32_t i = min, count = 0, list_count = 0; i <= max; i++ ) {
-
     if ( ( canid & shifted_mask ) == ( i & shifted_mask ) ) {
-
       if ( !list && list_count++ > 50 ) {
         Serial.print("...");
         break;
       }
-
-
       Serial.print("0x"); Serial.print(i, HEX);
       if ( count++ >= 5 ) {
         Serial.print("\n\t\t\t");
@@ -1951,25 +2215,23 @@ void IFCT::acceptedIDs(const IFCTMBNUM &mb_num, bool list) {
   }
   Serial.println("\n");
 
-  if ( !filter_enhancement[mb_num][0] ) Serial.println("Enhancement Disabled");
-  else Serial.println("Enhancement Enabled");
+  if ( !filter_enhancement[mb_num][0] ) Serial.println("\tEnhancement Disabled");
+  else Serial.println("\tEnhancement Enabled");
 
   if ( filter_enhancement[mb_num][1] ) {
     Serial.print("\t\t* Enhanced ID-range mode filtering:  0x"); /* ID range based */
-    Serial.print(filter_enhancement_config[mb_num][0],HEX);
+    Serial.print(filter_enhancement_config[mb_num][0], HEX);
     Serial.print(" <--> 0x");
-    Serial.print(filter_enhancement_config[mb_num][1],HEX);
+    Serial.print(filter_enhancement_config[mb_num][1], HEX);
   }
   else {
     Serial.print("\t\t* Enhanced Multi-ID mode filtering:  "); /* multi-id based */
-
     std::sort(&filter_enhancement_config[mb_num][0], &filter_enhancement_config[mb_num][5]);
-
     for ( uint8_t i = 0; i < 5; ) {
       Serial.print("0x");
-      Serial.print(filter_enhancement_config[mb_num][i],HEX);
+      Serial.print(filter_enhancement_config[mb_num][i], HEX);
       Serial.print(" ");
-      while ( (i < 4) && (filter_enhancement_config[mb_num][i] == filter_enhancement_config[mb_num][i+1]) ) {
+      while ( (i < 4) && (filter_enhancement_config[mb_num][i] == filter_enhancement_config[mb_num][i + 1]) ) {
         i++;
         continue;
       }
@@ -1977,8 +2239,6 @@ void IFCT::acceptedIDs(const IFCTMBNUM &mb_num, bool list) {
     }
   } Serial.println("\n");
 }
-
-
 
 
 
