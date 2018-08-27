@@ -748,7 +748,6 @@ void IFCT::IFCT_message_ISR(void) {
             sendMSGtoIndividualMBCallback((IFCTMBNUM)0, msg); /* send frames direct to callback (unbuffered) */
           }
           else {
-            if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(msg);
             struct2queue(msg); /* store frame in queue ( buffered ) */
             if ( flexcan_library_emulation ) flexcan_object_oriented_callbacks(msg);
           }
