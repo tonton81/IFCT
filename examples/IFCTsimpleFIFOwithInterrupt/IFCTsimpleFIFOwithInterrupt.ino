@@ -2,10 +2,9 @@
 
 void setup() {
   pinMode(2, OUTPUT); // for the transceiver enable pin
-  delay(1000);
   Can0.setBaudRate(1000000);
-  Can0.enableFIFO(1);
-  Can0.enableFIFOInterrupt(1);
+  Can0.enableFIFO();
+  Can0.enableFIFOInterrupt();
   Can0.onReceive(canSniff);
   Can0.intervalTimer(); // enable queue system and run callback in background.
 }
