@@ -12,7 +12,7 @@ void loop() {
   if ( Can0.read(msg) ) canSniff(msg);
 }
 
-void canSniff(const CAN_message_t &msg) { // global callback
+void canSniff(const CAN_message_t &msg) {
   Serial.print("MB "); Serial.print(msg.mb);
   Serial.print("  LEN: "); Serial.print(msg.len);
   Serial.print(" EXT: "); Serial.print(msg.flags.extended);
