@@ -3,7 +3,6 @@
 void setup() {
   pinMode(2, OUTPUT); // for the transceiver enable pin
   Can0.setBaudRate(1000000);
-  Can0.onReceive(canSniff);
   Can0.intervalTimer(); // enable queue system and run callback in background.
 }
 
