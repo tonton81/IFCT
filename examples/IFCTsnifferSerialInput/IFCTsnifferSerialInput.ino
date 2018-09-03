@@ -61,19 +61,34 @@ void last_output() {
 
   ( storage.find(frame, 10, 0, 0, 0) ) ? Serial.print(frame[9]) : Serial.print("0");
 
-  Serial.print("\n\tDATA[0]\tDATA[1]\tDATA[2]\tDATA[3]\tDATA[4]\tDATA[5]\tDATA[6]\tDATA[7]\t\n\t ");
+  if ( format != BIN) Serial.print("\n\tDATA[0]\tDATA[1]\tDATA[2]\tDATA[3]\tDATA[4]\tDATA[5]\tDATA[6]\tDATA[7]\t\n\t ");
+  else Serial.print("\n\t   DATA[0]\t   DATA[1]\t   DATA[2]\t   DATA[3]\t   DATA[4]\t   DATA[5]\t   DATA[6]\t   DATA[7]\t\n\t ");
+
   for ( uint32_t k = 0; k < last_entries.size(); k++ ) {
     last_entries.peek_front(frame, 10, k);
     for ( uint8_t i = 1; i < 9; i++ ) {
-      if ( format == HEX && i < 9 && i > 0 ) ( frame[i] < 0x10 ) ? Serial.print("0x0") : Serial.print("0x");
-      Serial.print(frame[i], (i == 9) ? DEC : format); Serial.print("\t ");
+      if ( format == BIN ) {
+        Serial.print("0b");
+        for ( uint8_t j = 0;  j < abs((32 - __builtin_clz(frame[i])) - 8); j++ ) Serial.print("0");
+        if ( frame[i] ) Serial.print(frame[i], format);
+        Serial.print("\t ");
+      }
+      else {
+        if ( format == HEX && i < 9 && i > 0 ) ( frame[i] < 0x10 ) ? Serial.print("0x0") : Serial.print("0x");
+        Serial.print(frame[i], (i == 9) ? DEC : format); Serial.print("\t ");
+      }
+
+
     } Serial.print("\n\t ");
   } Serial.println();
 }
 
 void main_console() {
   uint32_t frame[10];
-  Serial.print("\n\n\n\tCAN ID\tDATA[0]\tDATA[1]\tDATA[2]\tDATA[3]\tDATA[4]\tDATA[5]\tDATA[6]\tDATA[7]\tCOUNT\n    ");
+
+  if ( format != BIN) Serial.print("\n\n\n\tCAN ID\tDATA[0]\tDATA[1]\tDATA[2]\tDATA[3]\tDATA[4]\tDATA[5]\tDATA[6]\tDATA[7]\tCOUNT\n    ");
+  else Serial.print("\n\tCAN ID\t   DATA[0]\t   DATA[1]\t   DATA[2]\t   DATA[3]\t   DATA[4]\t   DATA[5]\t   DATA[6]\t   DATA[7]\tCOUNT\n    ");
+
   for ( uint32_t k = 0; k < storage.size(); k++ ) {
     frame[0] = ids.peek(k);
     storage.find(frame, 10, 0, 0, 0);
@@ -85,8 +100,18 @@ void main_console() {
         Serial.print(padded); Serial.print("\t ");
         continue;
       }
-      if ( format == HEX && i < 9 && i > 0 ) ( frame[i] < 0x10 ) ? Serial.print("0x0") : Serial.print("0x");
-      Serial.print(frame[i], (i == 9) ? DEC : format); Serial.print("\t ");
+      if ( format == BIN ) {
+        if ( i < 9 ) {
+          Serial.print("0b");
+          for ( uint8_t j = 0;  j < abs((32 - __builtin_clz(frame[i])) - 8); j++ ) Serial.print("0");
+        }
+        if ( frame[i] ) Serial.print(frame[i], (i == 9) ? DEC : format);
+        Serial.print("\t ");
+      }
+      else {
+        if ( format == HEX && i < 9 && i > 0 ) ( frame[i] < 0x10 ) ? Serial.print("0x0") : Serial.print("0x");
+        Serial.print(frame[i], (i == 9) ? DEC : format); Serial.print("\t ");
+      }
     } Serial.print("\n    ");
   } Serial.println();
 }
@@ -122,6 +147,10 @@ void serialEvent() {
       }
     case 'D': { // DEC output
         format = DEC;
+        break;
+      }
+    case 'B': { // BIN output
+        format = BIN;
         break;
       }
     case 'H': { // HEX output
