@@ -55,9 +55,8 @@ void canSniff(const CAN_message_t &msg) { // global callback
 
 void last_output() {
   uint32_t frame[10] = { last_id };
-  Serial.print("\n\n\n   Lastest results for CAN ID: ");
-  if ( format == HEX ) Serial.print("0x");
-  Serial.print(last_id, format);
+  Serial.print("\n\n\n   Lastest results for CAN ID: 0x");
+  Serial.print(last_id, HEX);
   Serial.print("\t  ID hit count: ");
 
   ( storage.find(frame, 10, 0, 0, 0) ) ? Serial.print(frame[9]) : Serial.print("0");
@@ -145,6 +144,5 @@ void serialEvent() {
   }
   digitalWrite(13, !digitalRead(13));
 }
-
 
 
