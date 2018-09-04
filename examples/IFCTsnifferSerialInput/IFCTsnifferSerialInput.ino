@@ -111,7 +111,7 @@ void main_console() {
     storage.find(frame, DATA_LEN, 0, 0, 0);
 
     /* TRIM MODE */ if ( trim_frames && frame[10] > trim_frames ) continue;
-
+    /* IGNORE SET COUNT */ if ( ignore_count && frame[10] > ignore_count ) continue;
 
     for ( uint8_t i = 0; i < DATA_LEN; i++ ) {
       if ( i == 11 ) {
@@ -186,7 +186,6 @@ void serialEvent() {
     case 'I': { // TRIM output
         _pos = strtok(NULL, delimiters);
         ignore_count = strtoul(_pos, NULL, 10);
-        Serial.println(ignore_count);
         break;
       }
     case 'T': { // TRIM output
