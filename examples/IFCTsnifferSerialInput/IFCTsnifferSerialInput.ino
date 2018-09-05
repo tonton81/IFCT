@@ -10,13 +10,13 @@ Circular_Buffer<uint32_t, CB_SIZE, DATA_LEN> last_entries;
 uint8_t option = 0;
 uint8_t format = HEX;
 uint32_t last_id = 0;
-uint32_t timer_frame = millis();
 uint32_t trim_frames = 0;
 uint16_t ignore_count = 0;
+uint8_t window_output = 0;
 
 void setup() {
   pinMode(2, OUTPUT); // for the transceiver enable pin
-  pinMode(13, OUTPUT);
+  pinMode(13, OUTPUT); // toggle led when a command is attempted
   Can0.setBaudRate(1000000);
   Can0.enableFIFO(1);
   Can0.enableFIFOInterrupt(1);
@@ -69,7 +69,7 @@ void last_output() {
   ( storage.find(frame, DATA_LEN, 0, 0, 0) ) ? Serial.print(frame[9]) : Serial.print("0");
 
   Serial.print("\tTime: ");
-  Serial.print(frame[10]);
+  Serial.println(frame[10]);
 
   if ( format != BIN) Serial.print("\n\tDATA[0]\tDATA[1]\tDATA[2]\tDATA[3]\tDATA[4]\tDATA[5]\tDATA[6]\tDATA[7]\t\tASCII\n\t ");
   else Serial.print("\n\t   DATA[0]\t   DATA[1]\t   DATA[2]\t   DATA[3]\t   DATA[4]\t   DATA[5]\t   DATA[6]\t   DATA[7]\t\tASCII\n\t ");
@@ -98,11 +98,12 @@ void last_output() {
 
     } Serial.print("\n\t ");
   } Serial.println();
+  if ( window_output ) for ( uint8_t i = 0; i < window_output + last_entries.capacity() - last_entries.size() - 2; i++ ) Serial.print('\n');
 }
 
 void main_console() {
   uint32_t frame[DATA_LEN];
-
+  uint16_t trim_counter = 0, ignore_counter = 0;
   if ( format != BIN) Serial.print("\n\n\n\tCAN ID\tDATA[0]\tDATA[1]\tDATA[2]\tDATA[3]\tDATA[4]\tDATA[5]\tDATA[6]\tDATA[7]\tCOUNT\t  TIME\t\tASCII\n    ");
   else Serial.print("\n\tCAN ID\t   DATA[0]\t   DATA[1]\t   DATA[2]\t   DATA[3]\t   DATA[4]\t   DATA[5]\t   DATA[6]\t   DATA[7]\tCOUNT\t  TIME\t\tASCII\n    ");
 
@@ -110,8 +111,16 @@ void main_console() {
     frame[0] = ids.peek(k);
     storage.find(frame, DATA_LEN, 0, 0, 0);
 
-    /* TRIM MODE */ if ( trim_frames && frame[10] > trim_frames ) continue;
-    /* IGNORE SET COUNT */ if ( ignore_count && frame[10] > ignore_count ) continue;
+    /* TRIM MODE */
+    if ( trim_frames && frame[10] > trim_frames ) {
+      trim_counter++;
+      continue;
+    }
+    /* IGNORE SET COUNT */
+    if ( ignore_count && frame[9] > ignore_count ) {
+      ignore_counter++;
+      continue;
+    }
 
     for ( uint8_t i = 0; i < DATA_LEN; i++ ) {
       if ( i == 11 ) {
@@ -131,7 +140,7 @@ void main_console() {
           Serial.print("0b");
           for ( uint8_t j = 0;  j < abs((32 - __builtin_clz(frame[i])) - 8); j++ ) Serial.print("0");
         }
-        if ( frame[i] ) Serial.print(frame[i], (i == 9) ? DEC : format);
+        if ( frame[i] ) Serial.print(frame[i], (i >= 9) ? DEC : format);
         Serial.print("\t ");
       }
       else {
@@ -140,6 +149,7 @@ void main_console() {
       }
     } Serial.print("\n    ");
   } Serial.println();
+  if ( window_output ) for ( uint8_t i = 0; i < window_output + storage.capacity() - storage.size() + trim_counter + ignore_counter; i++ ) Serial.print('\n');
 }
 
 
@@ -166,43 +176,66 @@ void serialEvent() {
           last_entries.flush();
           last_entries.push_front(frame, DATA_LEN);
           option = 1;
-          last_output();
         }
         else option = 0;
+        if ( !option ) main_console();
+        if ( option == 1 ) last_output();
         break;
       }
     case 'D': { // DEC output
         format = DEC;
+        if ( !option ) main_console();
+        if ( option == 1 ) last_output();
         break;
       }
     case 'B': { // BIN output
         format = BIN;
+        if ( !option ) main_console();
+        if ( option == 1 ) last_output();
         break;
       }
     case 'H': { // HEX output
         format = HEX;
+        if ( !option ) main_console();
+        if ( option == 1 ) last_output();
         break;
       }
     case 'I': { // TRIM output
         _pos = strtok(NULL, delimiters);
         ignore_count = strtoul(_pos, NULL, 10);
+        if ( !option ) main_console();
+        if ( option == 1 ) last_output();
+        break;
+      }
+    case 'W': { // Window output
+        _pos = strtok(NULL, delimiters);
+        window_output = strtoul(_pos, NULL, 10);
+        if ( !option ) main_console();
+        if ( option == 1 ) last_output();
         break;
       }
     case 'T': { // TRIM output
         _pos = strtok(NULL, delimiters);
         trim_frames = strtoul(_pos, NULL, 10);
+        if ( !option ) main_console();
+        if ( option == 1 ) last_output();
         break;
       }
     case 'M': { // main output
         option = 0;
+        if ( !option ) main_console();
+        if ( option == 1 ) last_output();
         break;
       }
     case 'R': { // reset
-        option = 0;
+        format = HEX;
+        option = trim_frames = ignore_count = window_output = 0;
         __disable_irq();
         storage.flush();
         ids.flush();
         __enable_irq();
+        if ( !option ) main_console();
+        if ( option == 1 ) last_output();
         break;
       }
 
