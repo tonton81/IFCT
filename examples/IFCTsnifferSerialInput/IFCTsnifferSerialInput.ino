@@ -178,53 +178,37 @@ void serialEvent() {
           option = 1;
         }
         else option = 0;
-        if ( !option ) main_console();
-        if ( option == 1 ) last_output();
         break;
       }
     case 'D': { // DEC output
         format = DEC;
-        if ( !option ) main_console();
-        if ( option == 1 ) last_output();
         break;
       }
     case 'B': { // BIN output
         format = BIN;
-        if ( !option ) main_console();
-        if ( option == 1 ) last_output();
         break;
       }
     case 'H': { // HEX output
         format = HEX;
-        if ( !option ) main_console();
-        if ( option == 1 ) last_output();
         break;
       }
     case 'I': { // TRIM output
         _pos = strtok(NULL, delimiters);
         ignore_count = strtoul(_pos, NULL, 10);
-        if ( !option ) main_console();
-        if ( option == 1 ) last_output();
         break;
       }
     case 'W': { // Window output
         _pos = strtok(NULL, delimiters);
         window_output = strtoul(_pos, NULL, 10);
-        if ( !option ) main_console();
-        if ( option == 1 ) last_output();
         break;
       }
     case 'T': { // TRIM output
         _pos = strtok(NULL, delimiters);
         trim_frames = strtoul(_pos, NULL, 10);
-        if ( !option ) main_console();
-        if ( option == 1 ) last_output();
         break;
       }
     case 'M': { // main output
         option = 0;
-        if ( !option ) main_console();
-        if ( option == 1 ) last_output();
         break;
       }
     case 'R': { // reset
@@ -234,11 +218,10 @@ void serialEvent() {
         storage.flush();
         ids.flush();
         __enable_irq();
-        if ( !option ) main_console();
-        if ( option == 1 ) last_output();
         break;
       }
-
+      if ( !option ) main_console();
+      if ( option == 1 ) last_output();
   }
   digitalWrite(13, !digitalRead(13));
 }
