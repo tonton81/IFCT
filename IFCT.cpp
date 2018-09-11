@@ -1590,6 +1590,9 @@ uint16_t IFCT::events() {
 }
 
 
+void __attribute__((weak)) ext_output(const CAN_message_t &msg) {
+}
+
 
 void IFCT::packet_distribution(CAN_message_t &frame) {
   uint8_t mailbox_offset = mailboxOffset();
