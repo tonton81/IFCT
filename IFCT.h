@@ -172,7 +172,7 @@ class CANListener {
     friend class IFCT;     // class has to have access to the the guts of this one
 };
 
-
+extern void ext_output(const CAN_message_t &msg);
 
 class IFCT {
 
@@ -194,6 +194,7 @@ class IFCT {
     void mailboxStatus(); /* shows status of each mailbox, RX, TX, FIFO, etc... */
     static _MB_ptr _MBhandlers[16]; /* individual mailbox handlers */
     static _MB_ptr _MBAllhandler; /* global mailbox handler */
+    constexpr static _MB_ptr _extOutput = ext_output;
     bool pollFIFO(CAN_message_t &msg, bool poll = 1);
     int write(const CAN_message_t &msg); /* use any available mailbox for transmitting */
     int write(IFCTMBNUM mb_num, const CAN_message_t &msg); /* use a single mailbox for transmitting */
@@ -304,7 +305,6 @@ class IFCT {
 
 extern IFCT Can0;
 extern IFCT Can1;
-
 
 
 //FlexCAN class emulation using IFCT
