@@ -1581,6 +1581,7 @@ uint16_t IFCT::events() {
       queue2struct(frame);
       if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(frame);
       sendMSGtoIndividualMBCallback((IFCTMBNUM)frame.mb, frame); 
+      ext_output(frame);
       return flexcanRxBuffer.size();
     }
 
@@ -2141,7 +2142,6 @@ void IFCT::acceptedIDs(const IFCTMBNUM &mb_num, bool list) {
           continue;
         }
 
-        uint32_t shifted_mask[4] = { (masks[filter])&0xFF000000, (masks[filter])&0x00FF0000, (masks[filter])&0x0000FF00, (masks[filter])&0x000000FF };
         uint32_t canid[4] = { filter_enhancement_config[filter][0], filter_enhancement_config[filter][1], filter_enhancement_config[filter][2], filter_enhancement_config[filter][3] };
         for ( uint8_t i = 0; i < 4; i++ ) {
           if ( __builtin_clz(canid[i]) <= 24 ) {
