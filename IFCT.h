@@ -66,7 +66,7 @@ typedef struct CAN_message_t {
     bool overrun = 0; // message overrun
     bool reserved = 0;
   } flags;
-  uint8_t len = 0;      // length of data
+  uint8_t len = 8;      // length of data
   uint8_t buf[8] = { 0 };       // data
   uint8_t mb = 0;       // used to identify mailbox reception
   uint8_t bus = 0;      // used to identify where the message came from when events() is used.
@@ -173,6 +173,7 @@ class CANListener {
 };
 
 extern void ext_output(const CAN_message_t &msg);
+extern uint16_t ext_events();
 
 class IFCT {
 
