@@ -190,11 +190,13 @@ class IFCT {
     bool setMB(const IFCTMBNUM &mb_num, const IFCTMBTXRX &mb_rx_tx, const IFCTMBIDE &ide = STD);
     void enableMBInterrupt(const IFCTMBNUM &mb_num, bool status = 1);
     void disableMBInterrupt(const IFCTMBNUM &mb_num) { enableMBInterrupt(mb_num, 0); }
-    void onReceive(const IFCTMBNUM &mb_num, _MB_ptr handler) { IFCT::_MBhandlers[mb_num] = handler; } /* individual mailbox callback function */
-    void onReceive(_MB_ptr handler) { IFCT::_MBAllhandler = handler; } /* global callback function */
+    void onReceive(const IFCTMBNUM &mb_num, _MB_ptr handler); /* individual mailbox callback function */
+    void onReceive(_MB_ptr handler); /* global callback function */
     void mailboxStatus(); /* shows status of each mailbox, RX, TX, FIFO, etc... */
-    static _MB_ptr _MBhandlers[16]; /* individual mailbox handlers */
-    static _MB_ptr _MBAllhandler; /* global mailbox handler */
+    static _MB_ptr _CAN0MBhandlers[16]; /* individual mailbox handlers for CAN0 */
+    static _MB_ptr _CAN0GLOBALhandler; /* global mailbox handler for CAN0 */
+    static _MB_ptr _CAN1MBhandlers[16]; /* individual mailbox handlers for CAN1 */
+    static _MB_ptr _CAN1GLOBALhandler; /* global mailbox handler for CAN1 */
     constexpr static _MB_ptr _extOutput = ext_output;
     bool pollFIFO(CAN_message_t &msg, bool poll = 1);
     int write(const CAN_message_t &msg); /* use any available mailbox for transmitting */
