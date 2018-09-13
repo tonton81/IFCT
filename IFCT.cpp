@@ -40,9 +40,10 @@ Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexc
 Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexcanTxBuffer;
 bool IFCT::can_events = 0;
 
-_MB_ptr IFCT::_MBhandlers[16] = { nullptr };
-_MB_ptr IFCT::_MBAllhandler = nullptr;
-
+_MB_ptr IFCT::_CAN0MBhandlers[16] = { nullptr };
+_MB_ptr IFCT::_CAN0GLOBALhandler = nullptr;
+_MB_ptr IFCT::_CAN1MBhandlers[16] = { nullptr };
+_MB_ptr IFCT::_CAN1GLOBALhandler = nullptr;
 
 IFCT Can0 = IFCT(1000000,FLEXCAN0_BASE);
 #if defined(__MK66FX1M0__)
@@ -425,7 +426,10 @@ void IFCT::setRRS(bool rrs) { /* store remote frames */
 
 
 void sendMSGtoIndividualMBCallback(const IFCTMBNUM &mb_num, const CAN_message_t &msg) { /* this is global for ISR use */
-  if ( IFCT::_MBhandlers[mb_num] != nullptr ) IFCT::_MBhandlers[mb_num](msg);
+  if ( !msg.bus && IFCT::_CAN0MBhandlers[mb_num] ) IFCT::_CAN0MBhandlers[mb_num](msg);
+#if defined(__MK66FX1M0__)
+  if ( msg.bus && IFCT::_CAN1MBhandlers[mb_num] ) IFCT::_CAN1MBhandlers[mb_num](msg);
+#endif
 }
 
 bool IFCT::pollFIFO(CAN_message_t &msg, bool poll) {
@@ -744,7 +748,8 @@ void IFCT::IFCT_message_ISR(void) {
 
         if ( ( enhance_filtering_success && filter_enhancement[0][0] ) || !filter_enhancement[0][0] ) { /* if enhanced AND success, OR not enhanced */
           if ( !can_events ) {
-            if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(msg);
+            if ( !msg.bus && IFCT::_CAN0GLOBALhandler ) IFCT::_CAN0GLOBALhandler(msg);
+            if ( msg.bus && IFCT::_CAN1GLOBALhandler ) IFCT::_CAN1GLOBALhandler(msg);
             sendMSGtoIndividualMBCallback((IFCTMBNUM)0, msg); /* send frames direct to callback (unbuffered) */
           }
           else {
@@ -817,7 +822,8 @@ void IFCT::IFCT_message_ISR(void) {
 
           if ( ( enhance_filtering_success && filter_enhancement[i][0] ) || !filter_enhancement[i][0] ) { /* if enhanced AND success, OR not enhanced */
             if ( !can_events ) {
-              if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(msg);
+            if ( !msg.bus && IFCT::_CAN0GLOBALhandler ) IFCT::_CAN0GLOBALhandler(msg);
+            if ( msg.bus && IFCT::_CAN1GLOBALhandler ) IFCT::_CAN1GLOBALhandler(msg);
               sendMSGtoIndividualMBCallback((IFCTMBNUM)i, msg); /* send frames direct to callback (unbuffered) */
               if ( flexcan_library_emulation ) flexcan_object_oriented_callbacks(msg);
             }
@@ -1581,7 +1587,8 @@ uint16_t IFCT::events() {
     if ( flexcanRxBuffer.size() ) { /* if a queue frame is available */
       CAN_message_t frame;
       queue2struct(frame);
-      if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(frame);
+      if ( !frame.bus && IFCT::_CAN0GLOBALhandler ) IFCT::_CAN0GLOBALhandler(frame);
+      if ( frame.bus && IFCT::_CAN1GLOBALhandler ) IFCT::_CAN1GLOBALhandler(frame);
       sendMSGtoIndividualMBCallback((IFCTMBNUM)frame.mb, frame); 
       return flexcanRxBuffer.size();
     }
@@ -2251,9 +2258,15 @@ void IFCT::acceptedIDs(const IFCTMBNUM &mb_num, bool list) {
 
 
 
+void IFCT::onReceive(const IFCTMBNUM &mb_num, _MB_ptr handler) {
+  if ( _baseAddress == FLEXCAN0_BASE ) IFCT::_CAN0MBhandlers[mb_num] = handler;
+  else IFCT::_CAN1MBhandlers[mb_num] = handler;
+}
 
-
-
+void IFCT::onReceive(_MB_ptr handler) {
+  if ( _baseAddress == FLEXCAN0_BASE ) IFCT::_CAN0GLOBALhandler = handler;
+  else IFCT::_CAN1GLOBALhandler = handler;
+}
 
 
 
