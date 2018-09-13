@@ -751,6 +751,7 @@ void IFCT::IFCT_message_ISR(void) {
             struct2queue(msg); /* store frame in queue ( buffered ) */
             if ( flexcan_library_emulation ) flexcan_object_oriented_callbacks(msg);
           }
+          ext_output(msg);
         }
 
         /* callback, queue, or neither, we check other filters for cross-matches */
@@ -824,6 +825,7 @@ void IFCT::IFCT_message_ISR(void) {
               struct2queue(msg); /* store frame in queue ( buffered ) */
               if ( flexcan_library_emulation ) flexcan_object_oriented_callbacks(msg);
             }
+            ext_output(msg);
           }
 
           if (!msg.flags.extended) FLEXCANb_MBn_CS(_baseAddress, i) = FLEXCAN_MB_CS_CODE(FLEXCAN_MB_CODE_RX_EMPTY);
@@ -1581,16 +1583,21 @@ uint16_t IFCT::events() {
       queue2struct(frame);
       if ( IFCT::_MBAllhandler != nullptr ) IFCT::_MBAllhandler(frame);
       sendMSGtoIndividualMBCallback((IFCTMBNUM)frame.mb, frame); 
-      ext_output(frame);
       return flexcanRxBuffer.size();
     }
 
-  } // SCOPE LOCK END 
+  } // SCOPE LOCK END
+
+  ext_events();
+ 
   return 0;
 }
 
 
 void __attribute__((weak)) ext_output(const CAN_message_t &msg) {
+}
+uint16_t __attribute__((weak)) ext_events() {
+  return 0;
 }
 
 
