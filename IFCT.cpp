@@ -427,9 +427,7 @@ void IFCT::setRRS(bool rrs) { /* store remote frames */
 
 void sendMSGtoIndividualMBCallback(const IFCTMBNUM &mb_num, const CAN_message_t &msg) { /* this is global for ISR use */
   if ( !msg.bus && IFCT::_CAN0MBhandlers[mb_num] ) IFCT::_CAN0MBhandlers[mb_num](msg);
-#if defined(__MK66FX1M0__)
   if ( msg.bus && IFCT::_CAN1MBhandlers[mb_num] ) IFCT::_CAN1MBhandlers[mb_num](msg);
-#endif
 }
 
 bool IFCT::pollFIFO(CAN_message_t &msg, bool poll) {
@@ -1580,6 +1578,8 @@ bool IFCT::connected() {
 
 uint16_t IFCT::events() {
 
+  ext_events();
+
   { Threads::Scope scope(CAN_THREAD[((this == &Can0) ? 0 : 1)]);
 
     if ( !can_events ) can_events = 1; /* handle callbacks from loop */
@@ -1595,8 +1595,6 @@ uint16_t IFCT::events() {
 
   } // SCOPE LOCK END
 
-  ext_events();
- 
   return 0;
 }
 
