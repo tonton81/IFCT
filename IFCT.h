@@ -55,7 +55,15 @@
 #define FLEXCANb_MAXMB_SIZE(b)            (((FLEXCANb_MCR(b) & FLEXCAN_MCR_MAXMB_MASK) & 0x7F)+1)
 #define FLEXCANb_ECR(b) (*(vuint32_t*)(b+0x1C))
 
-#define FLEXCAN_BUFFER_SIZE 256
+#define FLEXCAN_RX_BUFFER_SIZE 16
+
+#if __has_include(<CANquitto.h>)
+#define FLEXCAN_TX_BUFFER_SIZE 128
+#else
+#define FLEXCAN_TX_BUFFER_SIZE 16
+#endif
+
+#define FLEXCAN_LEGACY_BUFFER_SIZE 16
 
 typedef struct CAN_message_t {
   uint32_t id = 0;          // can identifier
@@ -220,9 +228,9 @@ class IFCT {
     bool setMBFilterRange(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2); /* filter a range of ids */
     void enhanceFilter(IFCTMBNUM mb_num);
     static uint16_t events();
-    static Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> flexcanRxBuffer; /* create an array buffer of struct size, 16 levels deep. */
-    static Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> flexcanTxBuffer; /* create an array buffer of struct size, 16 levels deep. */
-    static Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> flexcan_library; /* create an array buffer of struct size, 16 levels deep. */
+    static Circular_Buffer<uint8_t, FLEXCAN_RX_BUFFER_SIZE, sizeof(CAN_message_t)> flexcanRxBuffer; /* create an array buffer of struct size, 16 levels deep. */
+    static Circular_Buffer<uint8_t, FLEXCAN_TX_BUFFER_SIZE, sizeof(CAN_message_t)> flexcanTxBuffer; /* create an array buffer of struct size, 16 levels deep. */
+    static Circular_Buffer<uint8_t, FLEXCAN_LEGACY_BUFFER_SIZE, sizeof(CAN_message_t)> flexcan_library; /* create an array buffer of struct size, 16 levels deep. */
     void setFIFOFilter(const IFCTMBFLTEN &input);
     bool setFIFOFilter(uint8_t filter, uint32_t id1, const IFCTMBIDE &ide, const IFCTMBIDE &remote = NONE); /* single ID per filter */
     bool setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, const IFCTMBIDE &ide, const IFCTMBIDE &remote = NONE); /* 2 ID's per filter */
