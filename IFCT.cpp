@@ -30,15 +30,15 @@
 #include <kinetis_flexcan.h>
 #include <kinetis.h>
 #include "Arduino.h"
-IntervalTimer CAN_timer[2];
+IntervalTimer interval_timer;
 #include "TeensyThreads.h"
-Threads::Mutex CAN_THREAD[2];
 
 
 
 Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexcanRxBuffer;
 Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexcanTxBuffer;
 bool IFCT::can_events = 0;
+bool IFCT::one_process = 1;
 
 _MB_ptr IFCT::_CAN0MBhandlers[16] = { nullptr };
 _MB_ptr IFCT::_CAN0GLOBALhandler = nullptr;
@@ -1575,12 +1575,17 @@ bool IFCT::connected() {
 }
 
 
+void __attribute__((weak)) ext_output(const CAN_message_t &msg) {
+}
+uint16_t __attribute__((weak)) ext_events() {
+  return 0;
+}
+
+
 
 uint16_t IFCT::events() {
 
-  ext_events();
-
-  { Threads::Scope scope(CAN_THREAD[((this == &Can0) ? 0 : 1)]);
+    ext_events();
 
     if ( !can_events ) can_events = 1; /* handle callbacks from loop */
 
@@ -1593,15 +1598,6 @@ uint16_t IFCT::events() {
       return flexcanRxBuffer.size();
     }
 
-  } // SCOPE LOCK END
-
-  return 0;
-}
-
-
-void __attribute__((weak)) ext_output(const CAN_message_t &msg) {
-}
-uint16_t __attribute__((weak)) ext_events() {
   return 0;
 }
 
@@ -2278,90 +2274,39 @@ void IFCT::onReceive(_MB_ptr handler) {
 // ########################################  /* INTERVALTIMER */ ##################################################
 // ################################################################################################################
 
-void intervalTimerCan0() {
-  Can0.events();
+void background_process() {
+  IFCT::events();
 }
 
-#if defined(__MK66FX1M0__)
-void intervalTimerCan1() {
-  Can1.events();
-}
-#endif
-
-void IFCT::intervalTimer(bool enable, uint32_t time, uint8_t priority) {
-  if ( this == &Can0 ) {
-    if ( enable ) {
-      CAN_timer[0].begin(intervalTimerCan0, time);
-      CAN_timer[0].priority(priority);
-      teensyThread(0);
-    }
-    else CAN_timer[0].end();
-  }
-#if defined(__MK66FX1M0__)
-  if ( this == &Can1 ) {
-    if ( enable ) {
-      CAN_timer[1].begin(intervalTimerCan1, time);
-      CAN_timer[1].priority(priority);
-      teensyThread(0);
-    }
-    else CAN_timer[1].end();
-  }
-#endif
+void IFCT::intervalTimer(uint32_t time, uint8_t priority) {
+  if ( !IFCT::one_process ) return;
+  IFCT::one_process = 0;
+  interval_timer.begin(background_process, time);
+  interval_timer.priority(priority);
 }
 
+
+// ################################################################################################################
+// ########################################  /* STD::THREADS */ ##################################################
+// ################################################################################################################
+
+void IFCT::thread() {
+  if ( !IFCT::one_process ) return;
+  IFCT::one_process = 0;
+  std::thread thread_1(IFCT::events);
+  thread_1.detach();
+}
 
 
 // ################################################################################################################
 // ########################################  /* TEENSYTHREADS */ ##################################################
 // ################################################################################################################
 
-uint8_t can0_thread_block = 0;
-uint8_t can1_thread_block = 0;
-
-void can0_thread() {
-  while(1) {
-    if ( !can0_thread_block ) Can0.events();
-  }
+void IFCT::teensyThread() {
+  if ( !IFCT::one_process ) return;
+  IFCT::one_process = 0;
+  threads.addThread(background_process);
 }
-
-#if defined(__MK66FX1M0__)
-void can1_thread() {
-  while(1) {
-    if ( !can1_thread_block ) Can1.events();
-  }
-}
-#endif
-
-void IFCT::teensyThread(bool enable) {
-  if ( this == &Can0 ) {
-    if ( enable ) {
-      intervalTimer(0);
-      static bool once = 1;
-      if ( once ) threads.addThread(can0_thread);
-      once = 0;
-      can0_thread_block = 0;
-    }
-    else can0_thread_block = 1;
-  }
-#if defined(__MK66FX1M0__)
-  if ( this == &Can1 ) {
-    if ( enable ) {
-      static bool once = 1;
-      if ( once ) threads.addThread(can1_thread);
-      once = 0;
-      can1_thread_block = 0;
-    }
-    else can1_thread_block = 1;
-  }
-#endif
-}
-
-
-
-
-
-
-
 
 
 
