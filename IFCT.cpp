@@ -35,8 +35,8 @@ IntervalTimer interval_timer;
 
 
 
-Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexcanRxBuffer;
-Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexcanTxBuffer;
+Circular_Buffer<uint8_t, FLEXCAN_RX_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexcanRxBuffer;
+Circular_Buffer<uint8_t, FLEXCAN_TX_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexcanTxBuffer;
 bool IFCT::can_events = 0;
 bool IFCT::one_process = 1;
 
@@ -2335,7 +2335,7 @@ void IFCT::teensyThread() {
 // ################################################################################################################
 
 CAN_filter_t IFCT::defaultMask;
-Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexcan_library;
+Circular_Buffer<uint8_t, FLEXCAN_LEGACY_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexcan_library;
 
 void IFCT::begin(uint32_t baud, const CAN_filter_t &mask, uint8_t txAlt, uint8_t rxAlt) {
 
@@ -2365,7 +2365,7 @@ void IFCT::begin(uint32_t baud, const CAN_filter_t &mask, uint8_t txAlt, uint8_t
 void IFCT::clearStats(void) {
     memset(&stats, 0, sizeof(stats));
     stats.enabled = false;
-    stats.ringRxMax = FLEXCAN_BUFFER_SIZE - 1;
+    stats.ringRxMax = FLEXCAN_LEGACY_BUFFER_SIZE - 1;
     stats.ringTxMax = 7;
     stats.ringRxFramesLost = 0;
 }
