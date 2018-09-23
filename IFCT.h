@@ -56,13 +56,7 @@
 #define FLEXCANb_ECR(b) (*(vuint32_t*)(b+0x1C))
 
 #define FLEXCAN_RX_BUFFER_SIZE 16
-
-#if __has_include(<CANquitto.h>)
 #define FLEXCAN_TX_BUFFER_SIZE 128
-#else
-#define FLEXCAN_TX_BUFFER_SIZE 16
-#endif
-
 #define FLEXCAN_LEGACY_BUFFER_SIZE 16
 
 typedef struct CAN_message_t {
