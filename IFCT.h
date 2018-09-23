@@ -55,7 +55,7 @@
 #define FLEXCANb_MAXMB_SIZE(b)            (((FLEXCANb_MCR(b) & FLEXCAN_MCR_MAXMB_MASK) & 0x7F)+1)
 #define FLEXCANb_ECR(b) (*(vuint32_t*)(b+0x1C))
 
-#define FLEXCAN_BUFFER_SIZE 16
+#define FLEXCAN_BUFFER_SIZE 256
 
 typedef struct CAN_message_t {
   uint32_t id = 0;          // can identifier
@@ -219,7 +219,7 @@ class IFCT {
     bool setMBFilter(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4, uint32_t id5); /* input 5 ID's to be filtered */
     bool setMBFilterRange(IFCTMBNUM mb_num, uint32_t id1, uint32_t id2); /* filter a range of ids */
     void enhanceFilter(IFCTMBNUM mb_num);
-    uint16_t events();
+    static uint16_t events();
     static Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> flexcanRxBuffer; /* create an array buffer of struct size, 16 levels deep. */
     static Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> flexcanTxBuffer; /* create an array buffer of struct size, 16 levels deep. */
     static Circular_Buffer<uint8_t, FLEXCAN_BUFFER_SIZE, sizeof(CAN_message_t)> flexcan_library; /* create an array buffer of struct size, 16 levels deep. */
@@ -234,8 +234,9 @@ class IFCT {
     void setRFFN(uint8_t rffn); /* Number Of Rx FIFO Filters (0 == 8 filters, 1 == 16 filters, etc.. */
     bool setFIFOFilter(uint8_t filter, uint32_t id1, uint32_t id2, uint32_t id3, uint32_t id4 ); /* TableC 4 partial IDs per filter */
     void reset() { softResetRestore(); } /* reset flexcan controller while retaining configuration */
-    void intervalTimer(bool enable = 1, uint32_t time = 150, uint8_t priority = 128);
-    void teensyThread(bool enable = 1);
+    static void intervalTimer(uint32_t time = 25000, uint8_t priority = 32);
+    static void teensyThread();
+    static void thread();
     void currentMasks(); /* lists current set masks between FIFO and MBs */
     void distribute(bool state = 1) { msg_distribution = state; }
     void acceptedIDs(const IFCTMBNUM &mb_num, bool list = 0);
@@ -283,10 +284,10 @@ class IFCT {
   private:
     static bool can_events;
     uint8_t mailbox_reader_increment = 0;
-    void struct2queue(const CAN_message_t &msg);
-    void queue2struct(CAN_message_t &msg);
-    void struct2queueTx(const CAN_message_t &msg);
-    void queue2structTx(CAN_message_t &msg);
+    static void struct2queue(const CAN_message_t &msg);
+    static void queue2struct(CAN_message_t &msg);
+    static void struct2queueTx(const CAN_message_t &msg);
+    static void queue2structTx(CAN_message_t &msg);
     uint32_t _baseAddress = FLEXCAN0_BASE;
     uint32_t NVIC_IRQ = 0UL;
     uint32_t currentBitrate = 0UL;
@@ -303,6 +304,7 @@ class IFCT {
     uint8_t mailboxOffset();
     bool msg_distribution = 0;
     void writeTxMailbox(uint8_t mb_num, const CAN_message_t &msg);
+    static bool one_process;
 
 };
 
