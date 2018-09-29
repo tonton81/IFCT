@@ -62,7 +62,7 @@ class Circular_Buffer {
         void println(const char *p);
         uint16_t size() { return _available; }
         uint16_t available() { return _available; }
-        T capacity() { return _size; }
+        uint16_t capacity() { return _size; }
         uint16_t length_back() { return (((int)_cabuf[((head+size()-1)&(_size-1))][0] << 8*sizeof(T)) | (int)_cabuf[((head+size()-1)&(_size-1))][1]); }
         uint16_t length_front() { return (((int)_cabuf[((head)&(_size-1))][0] << 8*sizeof(T)) | (int)_cabuf[((head)&(_size-1))][1]); }
         T list();
@@ -93,7 +93,6 @@ class Circular_Buffer {
         volatile uint16_t tail = 0;
         volatile uint16_t _available = 0;
 
-        bool init_ca = 1;
         T _cbuf[_size];
         T _cabuf[_size][multi+2];
 };
@@ -115,7 +114,7 @@ bool Circular_Buffer<T,_size,multi>::remove(uint16_t pos) {
     if ( find_area == -1 ) return 0;
 
     while ( ((head+find_area)&(_size-1)) != ((head)&(_size-1)) ) {
-      memmove(_cabuf[((head+find_area)&(_size-1))],_cabuf[((head+find_area-1)&(_size-1))],(((int)_cabuf[((head+find_area-1)&(_size-1))][0] << 8*sizeof(T)) | (int)_cabuf[((head+find_area-1)&(_size-1))][1])+3*sizeof(T));
+      memmove(_cabuf[((head+find_area)&(_size-1))],_cabuf[((head+find_area-1)&(_size-1))], (2+multi)*sizeof(T));
       find_area--;
     }
     head = ((head + 1)&(2*_size-1));
