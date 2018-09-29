@@ -57,6 +57,7 @@
 
 #define FLEXCAN_RX_BUFFER_SIZE 16
 #define FLEXCAN_TX_BUFFER_SIZE 128
+#define FLEXCAN_TX1_BUFFER_SIZE 16
 #define FLEXCAN_LEGACY_BUFFER_SIZE 16
 
 typedef struct CAN_message_t {
@@ -224,6 +225,7 @@ class IFCT {
     static uint16_t events();
     static Circular_Buffer<uint8_t, FLEXCAN_RX_BUFFER_SIZE, sizeof(CAN_message_t)> flexcanRxBuffer; /* create an array buffer of struct size, 16 levels deep. */
     static Circular_Buffer<uint8_t, FLEXCAN_TX_BUFFER_SIZE, sizeof(CAN_message_t)> flexcanTxBuffer; /* create an array buffer of struct size, 16 levels deep. */
+    static Circular_Buffer<uint8_t, FLEXCAN_TX1_BUFFER_SIZE, sizeof(CAN_message_t)> flexcanTx1Buffer; /* create an array buffer of struct size, 16 levels deep. */
     static Circular_Buffer<uint8_t, FLEXCAN_LEGACY_BUFFER_SIZE, sizeof(CAN_message_t)> flexcan_library; /* create an array buffer of struct size, 16 levels deep. */
     void setFIFOFilter(const IFCTMBFLTEN &input);
     bool setFIFOFilter(uint8_t filter, uint32_t id1, const IFCTMBIDE &ide, const IFCTMBIDE &remote = NONE); /* single ID per filter */
@@ -289,7 +291,6 @@ class IFCT {
     static void struct2queue(const CAN_message_t &msg);
     static void queue2struct(CAN_message_t &msg);
     static void struct2queueTx(const CAN_message_t &msg);
-    static void queue2structTx(CAN_message_t &msg);
     uint32_t _baseAddress = FLEXCAN0_BASE;
     uint32_t NVIC_IRQ = 0UL;
     uint32_t currentBitrate = 0UL;
