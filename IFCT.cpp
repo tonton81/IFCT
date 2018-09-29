@@ -37,6 +37,7 @@ IntervalTimer interval_timer;
 
 Circular_Buffer<uint8_t, FLEXCAN_RX_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexcanRxBuffer;
 Circular_Buffer<uint8_t, FLEXCAN_TX_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexcanTxBuffer;
+Circular_Buffer<uint8_t, FLEXCAN_TX1_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexcanTx1Buffer;
 bool IFCT::can_events = 0;
 bool IFCT::one_process = 1;
 
@@ -463,9 +464,12 @@ int IFCT::write(const CAN_message_t &msg) {
 
   CAN_message_t sequence = msg;
 
+  if ( this != &Can0 ) sequence.bus = 1;
+
   if ( sequence.seq ) {
     sequence.mb = getFirstTxBox();
-    if ( flexcanTxBuffer.size() && flexcanTxBuffer.size() != flexcanTxBuffer.capacity() ) { /* queue if buffer exists and not full */
+    if ( (sequence.bus == 0 && flexcanTxBuffer.size() && flexcanTxBuffer.size() != flexcanTxBuffer.capacity()) ||
+         (sequence.bus == 1 && flexcanTx1Buffer.size() && flexcanTx1Buffer.size() != flexcanTx1Buffer.capacity()) ) { /* queue if buffer exists and not full */
       NVIC_DISABLE_IRQ(NVIC_IRQ);
       struct2queueTx(sequence);
       NVIC_ENABLE_IRQ(NVIC_IRQ);
@@ -485,8 +489,11 @@ int IFCT::write(const CAN_message_t &msg) {
     }
   }
 
-  if ( flexcanTxBuffer.size() < flexcanTxBuffer.capacity() ) {
+  if ( (sequence.bus == 0 && flexcanTxBuffer.size() < flexcanTxBuffer.capacity()) ||
+       (sequence.bus == 1 && flexcanTx1Buffer.size() < flexcanTx1Buffer.capacity()) ) {
+    NVIC_DISABLE_IRQ(NVIC_IRQ);
     struct2queueTx(sequence);
+    NVIC_ENABLE_IRQ(NVIC_IRQ);
     return 1; /* transmit entry accepted */
   }
 
@@ -497,12 +504,8 @@ int IFCT::write(const CAN_message_t &msg) {
 void IFCT::struct2queueTx(const CAN_message_t &msg) {
   uint8_t buf[sizeof(CAN_message_t)];
   memmove(buf, &msg, sizeof(msg));
-  flexcanTxBuffer.push_back(buf, sizeof(CAN_message_t));
-}
-void IFCT::queue2structTx(CAN_message_t &msg) {
-  uint8_t buf[sizeof(CAN_message_t)];
-  if ( flexcanTxBuffer.size() ) flexcanTxBuffer.pop_front(buf, sizeof(CAN_message_t));
-  memmove(&msg, buf, sizeof(msg));
+  if ( !msg.bus ) flexcanTxBuffer.push_back(buf, sizeof(CAN_message_t));
+  else flexcanTx1Buffer.push_back(buf, sizeof(CAN_message_t));
 }
 
 
@@ -820,8 +823,8 @@ void IFCT::IFCT_message_ISR(void) {
 
           if ( ( enhance_filtering_success && filter_enhancement[i][0] ) || !filter_enhancement[i][0] ) { /* if enhanced AND success, OR not enhanced */
             if ( !can_events ) {
-            if ( !msg.bus && IFCT::_CAN0GLOBALhandler ) IFCT::_CAN0GLOBALhandler(msg);
-            if ( msg.bus && IFCT::_CAN1GLOBALhandler ) IFCT::_CAN1GLOBALhandler(msg);
+              if ( !msg.bus && IFCT::_CAN0GLOBALhandler ) IFCT::_CAN0GLOBALhandler(msg);
+              if ( msg.bus && IFCT::_CAN1GLOBALhandler ) IFCT::_CAN1GLOBALhandler(msg);
               sendMSGtoIndividualMBCallback((IFCTMBNUM)i, msg); /* send frames direct to callback (unbuffered) */
               if ( flexcan_library_emulation ) flexcan_object_oriented_callbacks(msg);
             }
@@ -847,25 +850,24 @@ void IFCT::IFCT_message_ISR(void) {
 
       case FLEXCAN_MB_CODE_TX_INACTIVE: {       // TX inactive. Dequeue if available
           status &= ~(1UL << i); /* remove bit from initial flag lookup so it's not set at end when another frame is captured */
-          if ( flexcanTxBuffer.size() ) {
+          if ( (_baseAddress == FLEXCAN0_BASE && flexcanTxBuffer.size()) || (_baseAddress == FLEXCAN1_BASE && flexcanTx1Buffer.size()) ) {
             CAN_message_t queueToSend;
-
             uint8_t buf[sizeof(CAN_message_t)];
-            flexcanTxBuffer.peek_front(buf, sizeof(CAN_message_t));
+            if ( this == &Can0 ) flexcanTxBuffer.peek_front(buf, sizeof(CAN_message_t));
+            else flexcanTx1Buffer.peek_front(buf, sizeof(CAN_message_t));
             memmove(&queueToSend, buf, sizeof(queueToSend));
+
             if ( queueToSend.seq ) {
               if ( queueToSend.mb == i ) {
-                flexcanTxBuffer.read();
+                if ( this == &Can0 ) flexcanTxBuffer.read();
+                else flexcanTx1Buffer.read();
                 writeTxMailbox(i,queueToSend);
-                break;
               }
-              FLEXCANb_IFLAG1(_baseAddress) = (1UL << i); /* immediately flush interrupt of current mailbox */
-              break;
             }
             else {
-              queue2structTx(queueToSend);
+              if ( this == &Can0 ) flexcanTxBuffer.pop_front(buf, sizeof(CAN_message_t));
+              else flexcanTx1Buffer.pop_front(buf, sizeof(CAN_message_t));
               writeTxMailbox(i,queueToSend);
-              break;
             }
           }
           FLEXCANb_IFLAG1(_baseAddress) = (1UL << i); /* immediately flush interrupt of current mailbox */
@@ -1595,7 +1597,6 @@ uint16_t IFCT::events() {
       if ( !frame.bus && IFCT::_CAN0GLOBALhandler ) IFCT::_CAN0GLOBALhandler(frame);
       if ( frame.bus && IFCT::_CAN1GLOBALhandler ) IFCT::_CAN1GLOBALhandler(frame);
       sendMSGtoIndividualMBCallback((IFCTMBNUM)frame.mb, frame); 
-      return flexcanRxBuffer.size();
     }
 
   return 0;
@@ -2294,7 +2295,7 @@ void IFCT::thread() {
   if ( !IFCT::one_process ) return;
   IFCT::one_process = 0;
   std::thread thread_1(IFCT::events);
-  thread_1.detach();
+  thread_1.join();
 }
 
 
