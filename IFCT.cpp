@@ -34,7 +34,6 @@ IntervalTimer interval_timer;
 #include "TeensyThreads.h"
 
 
-
 Circular_Buffer<uint8_t, FLEXCAN_RX_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexcanRxBuffer;
 Circular_Buffer<uint8_t, FLEXCAN_TX_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexcanTxBuffer;
 Circular_Buffer<uint8_t, FLEXCAN_TX1_BUFFER_SIZE, sizeof(CAN_message_t)> IFCT::flexcanTx1Buffer;
@@ -2270,13 +2269,17 @@ void IFCT::onReceive(_MB_ptr handler) {
 
 
 
-
 // ################################################################################################################
 // ########################################  /* INTERVALTIMER */ ##################################################
 // ################################################################################################################
 
 void background_process() {
   IFCT::events();
+}
+void background_process_threads() {
+  while(1) {
+    IFCT::events();
+  }
 }
 
 void IFCT::intervalTimer(uint32_t time, uint8_t priority) {
@@ -2294,7 +2297,7 @@ void IFCT::intervalTimer(uint32_t time, uint8_t priority) {
 void IFCT::thread() {
   if ( !IFCT::one_process ) return;
   IFCT::one_process = 0;
-  std::thread thread_1(IFCT::events);
+  std::thread thread_1(background_process_threads);
   thread_1.join();
 }
 
@@ -2306,7 +2309,7 @@ void IFCT::thread() {
 void IFCT::teensyThread() {
   if ( !IFCT::one_process ) return;
   IFCT::one_process = 0;
-  threads.addThread(background_process);
+  threads.addThread(background_process_threads);
 }
 
 
